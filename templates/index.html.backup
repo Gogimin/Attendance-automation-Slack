@@ -20,21 +20,7 @@
             <p class="subtitle">여러 워크스페이스를 한 곳에서 관리하세요</p>
         </header>
 
-        <!-- 탭 네비게이션 -->
-        <div class="tabs">
-            <button class="tab active" data-tab="attendance">
-                📋 출석체크
-            </button>
-            <button class="tab" data-tab="assignment">
-                📝 과제체크
-            </button>
-            <button class="tab" data-tab="info">
-                📊 정보조회
-            </button>
-        </div>
-
-        <!-- 페이지 1: 출석체크 -->
-        <main id="attendance-tab" class="tab-content active">
+        <main>
             <!-- 워크스페이스 선택 -->
             <section class="card">
                 <h2>1️⃣ 워크스페이스 선택</h2>
@@ -50,7 +36,6 @@
                     <p><strong>시트 이름:</strong> <span id="sheet-name"></span></p>
                 </div>
                 <div id="workspace-actions" style="display: none; margin-top: 15px;">
-                    <button id="edit-workspace-btn" class="btn btn-secondary">✏️ 워크스페이스 수정</button>
                     <button id="manage-duplicates-btn" class="btn btn-secondary">👥 동명이인 관리</button>
                 </div>
             </section>
@@ -87,15 +72,9 @@
                         </div>
 
                         <div class="form-group">
-                            <label for="new-channel-id">Slack Channel ID (출석) *</label>
+                            <label for="new-channel-id">Slack Channel ID *</label>
                             <input type="text" id="new-channel-id" class="form-control" placeholder="C01234567">
                             <small>출석체크를 진행할 채널의 ID</small>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="new-assignment-channel-id">Slack Channel ID (과제)</label>
-                            <input type="text" id="new-assignment-channel-id" class="form-control" placeholder="C01234567">
-                            <small>과제체크를 진행할 채널의 ID (선택사항, 미입력시 출석 채널과 동일)</small>
                         </div>
 
                         <div class="form-group">
@@ -105,15 +84,9 @@
                         </div>
 
                         <div class="form-group">
-                            <label for="new-sheet-name">시트 이름 (출석)</label>
+                            <label for="new-sheet-name">시트 이름</label>
                             <input type="text" id="new-sheet-name" class="form-control" value="Sheet1">
                             <small>출석 데이터가 있는 시트 탭 이름 (기본: Sheet1)</small>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="new-assignment-sheet-name">시트 이름 (과제)</label>
-                            <input type="text" id="new-assignment-sheet-name" class="form-control" value="과제실습 모니터링">
-                            <small>과제 데이터가 있는 시트 탭 이름 (기본: 과제실습 모니터링)</small>
                         </div>
 
                         <div class="form-row">
@@ -409,47 +382,6 @@
                 </div>
             </div>
 
-            <!-- 워크스페이스 수정 모달 -->
-            <div id="edit-workspace-modal" class="modal" style="display: none;">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h2>✏️ 워크스페이스 수정</h2>
-                        <span class="modal-close">&times;</span>
-                    </div>
-                    <div class="modal-body">
-                        <input type="hidden" id="edit-workspace-name" />
-
-                        <div class="form-group">
-                            <label>워크스페이스 이름</label>
-                            <p id="edit-workspace-display" style="margin: 5px 0; font-weight: bold; color: #333;"></p>
-                            <small>* 아래 필드만 수정 가능합니다</small>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="edit-assignment-channel-id">Slack Channel ID (과제)</label>
-                            <input type="text" id="edit-assignment-channel-id" class="form-control" placeholder="C01234567">
-                            <small>과제체크를 진행할 채널의 ID (비워두면 출석 채널과 동일)</small>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="edit-assignment-sheet-name">시트 이름 (과제)</label>
-                            <input type="text" id="edit-assignment-sheet-name" class="form-control" value="과제실습 모니터링">
-                            <small>과제 데이터가 있는 시트 탭 이름</small>
-                        </div>
-
-                        <div class="info-box" style="margin-top: 15px; background: #e3f2fd;">
-                            <p><strong>ℹ️ 안내</strong></p>
-                            <p style="font-size: 0.9rem; margin: 5px 0;">• 구버전 config.json을 사용 중이라면 이 기능으로 과제 관련 필드를 추가할 수 있습니다.</p>
-                            <p style="font-size: 0.9rem; margin: 5px 0;">• 다른 필드를 수정하려면 직접 config.json 파일을 편집하세요.</p>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button id="cancel-edit-workspace-btn" class="btn btn-secondary">취소</button>
-                        <button id="save-edit-workspace-btn" class="btn btn-success">✓ 저장</button>
-                    </div>
-                </div>
-            </div>
-
             <!-- 실행 버튼 -->
             <section class="card">
                 <button id="run-btn" class="btn btn-success btn-large">▶️ 출석체크 시작 (지금 바로 실행)</button>
@@ -518,120 +450,6 @@
                 <p id="error-message"></p>
             </section>
         </main>
-
-        <!-- 페이지 2: 과제체크 -->
-        <div id="assignment-tab" class="tab-content" style="display:none;">
-            <!-- 워크스페이스 선택 -->
-            <section class="card">
-                <h2>1️⃣ 워크스페이스 선택</h2>
-                <select id="assignment-workspace-select" class="form-control">
-                    <option value="">워크스페이스를 선택하세요...</option>
-                </select>
-            </section>
-
-            <!-- 과제 스레드 입력 -->
-            <section class="card">
-                <h2>2️⃣ 과제 스레드 입력</h2>
-                <input type="text" id="assignment-thread-input" class="form-control"
-                       placeholder="과제 스레드 링크 입력 (예: https://workspace.slack.com/archives/...)">
-                <small>슬랙 과제 인증 스레드 링크를 붙여넣으세요</small>
-            </section>
-
-            <!-- 과제 체크 설정 -->
-            <section class="card">
-                <h2>3️⃣ 과제 체크 설정</h2>
-
-                <div class="form-group">
-                    <label for="assignment-column">기록할 열</label>
-                    <input type="text" id="assignment-column" class="form-control small"
-                           value="D" maxlength="2" placeholder="D">
-                    <small>"과제실습 모니터링" 시트의 어느 열에 기록할지 (예: D=10_25과제, E=10_27과제)</small>
-                </div>
-
-                <div class="checkbox-group">
-                    <label>
-                        <input type="checkbox" id="assignment-mark-absent" checked>
-                        미제출자에게 'X' 표시
-                    </label>
-                </div>
-
-                <button id="run-assignment-btn" class="btn btn-primary">
-                    📝 과제 체크 시작
-                </button>
-            </section>
-
-            <!-- 과제 체크 결과 -->
-            <section class="card" id="assignment-result" style="display:none;">
-                <h2>📊 과제 제출 현황</h2>
-                <p class="subtitle-small">
-                    ✓ 구글 시트에 자동 업데이트되었습니다
-                    (시트: <strong>과제실습 모니터링</strong>, 열: <strong><span id="result-column"></span></strong>)
-                </p>
-
-                <div class="stats-grid">
-                    <div class="stat-card success">
-                        <div class="stat-icon">✅</div>
-                        <div class="stat-info">
-                            <div class="stat-label">제출자</div>
-                            <div class="stat-value" id="submitted-count">0명</div>
-                        </div>
-                    </div>
-                    <div class="stat-card danger">
-                        <div class="stat-icon">❌</div>
-                        <div class="stat-info">
-                            <div class="stat-label">미제출자</div>
-                            <div class="stat-value" id="not-submitted-count">0명</div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="result-lists">
-                    <div class="list-card submitted-list">
-                        <h3>✅ 제출자</h3>
-                        <ul id="submitted-names"></ul>
-                    </div>
-                    <div class="list-card not-submitted-list">
-                        <h3>❌ 미제출자</h3>
-                        <ul id="not-submitted-names"></ul>
-                    </div>
-                </div>
-            </section>
-
-            <!-- 최근 체크 기록 -->
-            <section class="card">
-                <h2>📜 최근 체크 기록 (최근 5개)</h2>
-                <div id="recent-assignment-history">
-                    <p class="info-text">아직 과제 체크 기록이 없습니다.</p>
-                </div>
-            </section>
-        </div>
-
-        <!-- 페이지 3: 정보조회 -->
-        <div id="info-tab" class="tab-content" style="display:none;">
-            <!-- 워크스페이스 선택 -->
-            <section class="card">
-                <h2>워크스페이스 선택</h2>
-                <select id="info-workspace-select" class="form-control">
-                    <option value="">워크스페이스를 선택하세요...</option>
-                </select>
-            </section>
-
-            <!-- 자동 실행 스케줄 -->
-            <section class="card" id="schedule-info" style="display:none;">
-                <h2>📅 자동 실행 스케줄</h2>
-                <div id="schedule-details">
-                    <!-- JavaScript로 동적 생성 -->
-                </div>
-            </section>
-
-            <!-- 과제 체크 기록 -->
-            <section class="card" id="assignment-history-section" style="display:none;">
-                <h2>📜 과제 체크 기록</h2>
-                <div id="assignment-history-list">
-                    <!-- JavaScript로 동적 생성 -->
-                </div>
-            </section>
-        </div>
 
         <footer>
             <p>슬랙 출석체크 자동화 시스템 v2.0</p>

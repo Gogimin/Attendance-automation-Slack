@@ -239,6 +239,96 @@ class SheetsHandler:
 
         return success_count
 
+    def update_assignment(self, sheet_name: str, row_number: int, column: int, value: str = "O") -> bool:
+        """
+        과제 시트의 특정 셀 업데이트
+
+        Args:
+            sheet_name (str): 시트 이름 (예: "과제실습 모니터링")
+            row_number (int): 행 번호 (0-based)
+            column (int): 열 인덱스 (0-based)
+            value (str): 기록할 값 (O/X 등)
+
+        Returns:
+            bool: 업데이트 성공 여부
+        """
+        if not self.service:
+            return False
+
+        try:
+            # A1 notation으로 변환
+            col_letter = chr(65 + column) if column < 26 else chr(65 + column // 26 - 1) + chr(65 + column % 26)
+            row_num = row_number + 1  # 0-based -> 1-based
+            cell_range = f"{sheet_name}!{col_letter}{row_num}"
+
+            body = {
+                'values': [[value]]
+            }
+
+            self.service.spreadsheets().values().update(
+                spreadsheetId=self.spreadsheet_id,
+                range=cell_range,
+                valueInputOption='USER_ENTERED',
+                body=body
+            ).execute()
+
+            return True
+
+        except HttpError as e:
+            print(f"✗ 과제 셀 업데이트 실패 ({cell_range}): {e}")
+            return False
+        except Exception as e:
+            print(f"✗ 오류 발생: {e}")
+            return False
+
+    def batch_update_assignment(self, sheet_name: str, column: int, students: Dict[str, int],
+                                submitted: List[str], mark_absent: bool = True) -> int:
+        """
+        과제실습 모니터링 시트에 O/X 표시 (배치 처리)
+
+        Args:
+            sheet_name (str): 시트 이름 (예: "과제실습 모니터링")
+            column (int): 기록할 열 인덱스 (0-based)
+            students (Dict[str, int]): 학생 명단 딕셔너리 {이름: 행번호}
+            submitted (List[str]): 제출자 이름 리스트
+            mark_absent (bool): 미제출자 X 표시 여부
+
+        Returns:
+            int: 성공한 업데이트 수
+        """
+        if not self.service or not students:
+            return 0
+
+        print(f"\n[Google Sheets] 과제 제출 현황 업데이트 중...")
+        print(f"  - 시트: {sheet_name}")
+        print(f"  - 열: {chr(65 + column) if column < 26 else '??'}")
+
+        success_count = 0
+
+        for student_name, row in students.items():
+            if student_name in submitted:
+                value = "O"
+                status_text = "제출"
+            else:
+                if mark_absent:
+                    value = "X"
+                    status_text = "미제출"
+                else:
+                    continue  # 미제출자 표시 안함
+
+            if self.update_assignment(sheet_name, row, column, value):
+                print(f"  ✓ {student_name} - {status_text} ({value})")
+                success_count += 1
+            else:
+                print(f"  ✗ {student_name} - 업데이트 실패")
+
+            # API Rate Limiting 방지
+            time.sleep(0.1)
+
+        print(f"\n✓ 과제 체크 완료: {success_count}/{len(students)}명")
+
+        return success_count
+
 
 # 테스트 코드
 if __name__ == '__main__':

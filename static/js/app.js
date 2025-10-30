@@ -78,8 +78,19 @@ function setupEventListeners() {
     // 예약 현황 새로고침 버튼
     document.getElementById('refresh-schedule-btn').addEventListener('click', loadAllSchedules);
 
+    // 워크스페이스 수정 버튼
+    document.getElementById('edit-workspace-btn').addEventListener('click', openEditWorkspaceModal);
+
     // 동명이인 관리 버튼
     document.getElementById('manage-duplicates-btn').addEventListener('click', openDuplicateNamesModal);
+
+    // 워크스페이스 수정 모달 닫기
+    const editWorkspaceModalClose = document.querySelectorAll('#edit-workspace-modal .modal-close')[0];
+    if (editWorkspaceModalClose) {
+        editWorkspaceModalClose.addEventListener('click', closeEditWorkspaceModal);
+    }
+    document.getElementById('cancel-edit-workspace-btn').addEventListener('click', closeEditWorkspaceModal);
+    document.getElementById('save-edit-workspace-btn').addEventListener('click', saveEditWorkspace);
 
     // 동명이인 모달 닫기
     const duplicateModalClose = document.querySelectorAll('#duplicate-names-modal .modal-close')[0];
@@ -908,8 +919,10 @@ function clearAddWorkspaceForm() {
     document.getElementById('new-display-name').value = '';
     document.getElementById('new-bot-token').value = '';
     document.getElementById('new-channel-id').value = '';
+    document.getElementById('new-assignment-channel-id').value = '';
     document.getElementById('new-spreadsheet-id').value = '';
-    document.getElementById('new-sheet-name').value = 'Sheet1';
+    document.getElementById('new-sheet-name').value = '출석현황';
+    document.getElementById('new-assignment-sheet-name').value = '실습과제현황';
     document.getElementById('new-name-column').value = 'B';
     document.getElementById('new-start-row').value = '4';
     document.getElementById('new-credentials').value = '';
@@ -922,8 +935,10 @@ async function submitAddWorkspace() {
     const displayName = document.getElementById('new-display-name').value.trim();
     const botToken = document.getElementById('new-bot-token').value.trim();
     const channelId = document.getElementById('new-channel-id').value.trim();
+    const assignmentChannelId = document.getElementById('new-assignment-channel-id').value.trim();
     const spreadsheetId = document.getElementById('new-spreadsheet-id').value.trim();
     const sheetName = document.getElementById('new-sheet-name').value.trim();
+    const assignmentSheetName = document.getElementById('new-assignment-sheet-name').value.trim();
     const nameColumn = document.getElementById('new-name-column').value.trim();
     const startRow = parseInt(document.getElementById('new-start-row').value);
     const credentialsText = document.getElementById('new-credentials').value.trim();
@@ -995,8 +1010,10 @@ async function submitAddWorkspace() {
                 display_name: displayName,
                 slack_bot_token: botToken,
                 slack_channel_id: channelId,
+                assignment_channel_id: assignmentChannelId,
                 spreadsheet_id: spreadsheetId,
                 sheet_name: sheetName,
+                assignment_sheet_name: assignmentSheetName,
                 name_column: nameColumn,
                 start_row: startRow,
                 credentials_json: credentialsJson
@@ -1563,5 +1580,345 @@ async function saveDuplicateNames() {
     } finally {
         btn.disabled = false;
         btn.innerHTML = originalText;
+    }
+}
+
+
+// ========================================
+// 탭 시스템
+// ========================================
+
+// setupEventListeners 함수에 탭 시스템 초기화 추가
+(function() {
+    const originalSetup = setupEventListeners;
+    setupEventListeners = function() {
+        originalSetup();
+
+        // 탭 전환 이벤트 등록
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', function() {
+                const tabName = this.dataset.tab;
+
+                // 모든 탭 비활성화
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+
+                // 모든 탭 컨텐츠 숨기기
+                document.querySelectorAll('.tab-content').forEach(c => {
+                    c.classList.remove('active');
+                    c.style.display = 'none';
+                });
+
+                // 선택한 탭 활성화
+                this.classList.add('active');
+
+                // 선택한 탭 컨텐츠 보이기
+                const targetTab = document.getElementById(`${tabName}-tab`);
+                if (targetTab) {
+                    targetTab.classList.add('active');
+                    targetTab.style.display = 'block';
+                }
+
+                // 탭별 초기화 함수 호출
+                if (tabName === 'assignment') {
+                    loadAssignmentWorkspaces();
+                } else if (tabName === 'info') {
+                    loadInfoWorkspaces();
+                }
+            });
+        });
+
+        // 과제 체크 실행 버튼 이벤트
+        const runAssignmentBtn = document.getElementById('run-assignment-btn');
+        if (runAssignmentBtn) {
+            runAssignmentBtn.addEventListener('click', runAssignmentCheck);
+        }
+
+        // 과제체크 탭 워크스페이스 선택 이벤트
+        const assignmentWorkspaceSelect = document.getElementById('assignment-workspace-select');
+        if (assignmentWorkspaceSelect) {
+            assignmentWorkspaceSelect.addEventListener('change', async function(e) {
+                const workspace = e.target.value;
+                if (!workspace) {
+                    const container = document.getElementById('recent-assignment-history');
+                    if (container) container.innerHTML = '';
+                    return;
+                }
+                await loadRecentAssignmentHistory(workspace);
+            });
+        }
+
+        // 정보조회 탭 워크스페이스 선택 이벤트
+        const infoWorkspaceSelect = document.getElementById('info-workspace-select');
+        if (infoWorkspaceSelect) {
+            infoWorkspaceSelect.addEventListener('change', async function(e) {
+                const workspace = e.target.value;
+                if (!workspace) {
+                    document.getElementById('schedule-info').style.display = 'none';
+                    document.getElementById('assignment-history-section').style.display = 'none';
+                    return;
+                }
+                await loadScheduleInfo(workspace);
+                await loadAssignmentHistoryFull(workspace);
+            });
+        }
+    };
+})();
+
+// 과제체크 탭 워크스페이스 로드
+async function loadAssignmentWorkspaces() {
+    const select = document.getElementById('assignment-workspace-select');
+    if (!select || select.options.length > 1) return;
+
+    try {
+        const response = await fetch('/api/workspaces');
+        const data = await response.json();
+
+        if (data.success) {
+            data.workspaces.forEach(ws => {
+                const option = document.createElement('option');
+                option.value = ws.folder_name;
+                option.textContent = ws.name;
+                select.appendChild(option);
+            });
+        }
+    } catch (error) {
+        console.error('워크스페이스 로드 오류:', error);
+    }
+}
+
+// 과제 체크 실행
+async function runAssignmentCheck() {
+    const workspace = document.getElementById('assignment-workspace-select').value;
+    const threadInput = document.getElementById('assignment-thread-input').value.trim();
+    const column = document.getElementById('assignment-column').value.trim().toUpperCase();
+    const markAbsent = document.getElementById('assignment-mark-absent').checked;
+
+    if (!workspace || !threadInput || !column) {
+        alert('모든 필드를 입력해주세요.');
+        return;
+    }
+
+    const btn = document.getElementById('run-assignment-btn');
+    const originalText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '⏳ 과제 체크 중...';
+
+    try {
+        const response = await fetch('/api/run-assignment', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                workspace: workspace,
+                thread_ts: threadInput,
+                column: column,
+                mark_absent: markAbsent
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            displayAssignmentResult(data.result);
+            loadRecentAssignmentHistory(workspace);
+            alert('✅ 과제 체크가 완료되었습니다!');
+        } else {
+            alert(`❌ 오류: ${data.error}`);
+        }
+    } catch (error) {
+        alert(`❌ 오류: ${error.message}`);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+    }
+}
+
+// 과제 체크 결과 표시
+function displayAssignmentResult(result) {
+    const resultSection = document.getElementById('assignment-result');
+    resultSection.style.display = 'block';
+
+    document.getElementById('result-column').textContent = result.column;
+    document.getElementById('submitted-count').textContent = `${result.submitted_count}명`;
+    document.getElementById('not-submitted-count').textContent = `${result.not_submitted_count}명`;
+
+    const submittedList = document.getElementById('submitted-names');
+    submittedList.innerHTML = result.submitted.length > 0
+        ? result.submitted.map(name => `<li>✅ ${name}</li>`).join('')
+        : '<li class="info-text">제출자가 없습니다.</li>';
+
+    const notSubmittedList = document.getElementById('not-submitted-names');
+    notSubmittedList.innerHTML = result.not_submitted.length > 0
+        ? result.not_submitted.map(name => `<li>❌ ${name}</li>`).join('')
+        : '<li class="info-text">모두 제출했습니다!</li>';
+
+    resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// 최근 과제 체크 기록 로드
+async function loadRecentAssignmentHistory(workspace) {
+    try {
+        const response = await fetch(`/api/assignment-history/${workspace}`);
+        const data = await response.json();
+
+        if (data.success) {
+            const container = document.getElementById('recent-assignment-history');
+            const history = data.history.slice(0, 5);
+
+            if (history.length === 0) {
+                container.innerHTML = '<p class="info-text">아직 과제 체크 기록이 없습니다.</p>';
+                return;
+            }
+
+            container.innerHTML = history.map((record, index) => `
+                <div class="history-item" style="cursor: pointer;" onclick="toggleHistoryDetail('recent-history-detail-${index}')">
+                    <div class="history-header">🕐 ${record.timestamp}</div>
+                    <div class="history-body">
+                        <p><strong>열:</strong> ${record.column}열</p>
+                        <p><strong>제출:</strong> ${record.submitted_count}명 / <strong>미제출:</strong> ${record.not_submitted_count}명</p>
+                        <p style="font-size: 0.85rem; color: #888; margin-top: 5px;">▼ 클릭하여 상세 보기</p>
+                    </div>
+                    <div id="recent-history-detail-${index}" class="history-detail" style="display: none; margin-top: 15px; padding-top: 15px; border-top: 1px solid #e0e0e0;">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                            <div>
+                                <h4 style="color: #28a745; margin-bottom: 10px;">✅ 제출자 (${record.submitted_count}명)</h4>
+                                <ul style="max-height: 300px; overflow-y: auto; padding-left: 20px;">
+                                    ${record.submitted_list && record.submitted_list.length > 0
+                                        ? record.submitted_list.map(name => `<li>${name}</li>`).join('')
+                                        : '<li style="color: #999;">제출자가 없습니다.</li>'}
+                                </ul>
+                            </div>
+                            <div>
+                                <h4 style="color: #dc3545; margin-bottom: 10px;">❌ 미제출자 (${record.not_submitted_count}명)</h4>
+                                <ul style="max-height: 300px; overflow-y: auto; padding-left: 20px;">
+                                    ${record.not_submitted_list && record.not_submitted_list.length > 0
+                                        ? record.not_submitted_list.map(name => `<li>${name}</li>`).join('')
+                                        : '<li style="color: #999;">모두 제출했습니다!</li>'}
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+    } catch (error) {
+        console.error('과제 기록 로드 오류:', error);
+    }
+}
+
+// 정보조회 탭 워크스페이스 로드
+async function loadInfoWorkspaces() {
+    const select = document.getElementById('info-workspace-select');
+    if (!select || select.options.length > 1) return;
+
+    try {
+        const response = await fetch('/api/workspaces');
+        const data = await response.json();
+
+        if (data.success) {
+            data.workspaces.forEach(ws => {
+                const option = document.createElement('option');
+                option.value = ws.folder_name;
+                option.textContent = ws.name;
+                select.appendChild(option);
+            });
+        }
+    } catch (error) {
+        console.error('워크스페이스 로드 오류:', error);
+    }
+}
+
+// 스케줄 정보 로드
+async function loadScheduleInfo(workspace) {
+    try {
+        const response = await fetch(`/api/schedule/${workspace}`);
+        const data = await response.json();
+
+        if (data.success && data.schedule && data.schedule.enabled) {
+            const scheduleSection = document.getElementById('schedule-info');
+            const scheduleDetails = document.getElementById('schedule-details');
+            const schedule = data.schedule;
+            const schedules = schedule.schedules || [];
+
+            if (schedules.length > 0) {
+                scheduleDetails.innerHTML = schedules.map(item => `
+                    <div class="info-box" style="margin-bottom: 15px;">
+                        <p><strong>📌 ${item.day || '매주'}</strong></p>
+                        ${item.create_thread_time ? `<p>• 출석 스레드 생성: ${item.create_thread_time}</p>` : ''}
+                        ${item.check_attendance_time ? `<p>• 출석 집계: ${item.check_attendance_time} (${item.check_attendance_column || ''}열)</p>` : ''}
+                    </div>
+                `).join('');
+                scheduleSection.style.display = 'block';
+            }
+        } else {
+            document.getElementById('schedule-info').style.display = 'none';
+        }
+    } catch (error) {
+        console.error('스케줄 정보 로드 오류:', error);
+    }
+}
+
+// 전체 과제 체크 기록 로드
+async function loadAssignmentHistoryFull(workspace) {
+    try {
+        const response = await fetch(`/api/assignment-history/${workspace}`);
+        const data = await response.json();
+
+        if (data.success) {
+            const section = document.getElementById('assignment-history-section');
+            const container = document.getElementById('assignment-history-list');
+
+            if (data.history.length === 0) {
+                container.innerHTML = '<p class="info-text">아직 과제 체크 기록이 없습니다.</p>';
+                section.style.display = 'block';
+                return;
+            }
+
+            container.innerHTML = data.history.map((record, index) => `
+                <div class="history-item" style="cursor: pointer;" onclick="toggleHistoryDetail('history-detail-${index}')">
+                    <div class="history-header">🕐 ${record.timestamp}</div>
+                    <div class="history-body">
+                        <p><strong>열:</strong> ${record.column}열</p>
+                        <p><strong>제출:</strong> ${record.submitted_count}명 / <strong>미제출:</strong> ${record.not_submitted_count}명</p>
+                        ${record.thread_link ? `<a href="${record.thread_link}" target="_blank" class="btn btn-small" onclick="event.stopPropagation()">슬랙에서 보기</a>` : ''}
+                        <p style="font-size: 0.85rem; color: #888; margin-top: 5px;">▼ 클릭하여 상세 보기</p>
+                    </div>
+                    <div id="history-detail-${index}" class="history-detail" style="display: none; margin-top: 15px; padding-top: 15px; border-top: 1px solid #e0e0e0;">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                            <div>
+                                <h4 style="color: #28a745; margin-bottom: 10px;">✅ 제출자 (${record.submitted_count}명)</h4>
+                                <ul style="max-height: 300px; overflow-y: auto; padding-left: 20px;">
+                                    ${record.submitted_list && record.submitted_list.length > 0
+                                        ? record.submitted_list.map(name => `<li>${name}</li>`).join('')
+                                        : '<li style="color: #999;">제출자가 없습니다.</li>'}
+                                </ul>
+                            </div>
+                            <div>
+                                <h4 style="color: #dc3545; margin-bottom: 10px;">❌ 미제출자 (${record.not_submitted_count}명)</h4>
+                                <ul style="max-height: 300px; overflow-y: auto; padding-left: 20px;">
+                                    ${record.not_submitted_list && record.not_submitted_list.length > 0
+                                        ? record.not_submitted_list.map(name => `<li>${name}</li>`).join('')
+                                        : '<li style="color: #999;">모두 제출했습니다!</li>'}
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+            section.style.display = 'block';
+        }
+    } catch (error) {
+        console.error('과제 기록 로드 오류:', error);
+    }
+}
+
+// 과제 이력 상세 토글
+function toggleHistoryDetail(detailId) {
+    const detailElement = document.getElementById(detailId);
+    if (detailElement) {
+        if (detailElement.style.display === 'none') {
+            detailElement.style.display = 'block';
+        } else {
+            detailElement.style.display = 'none';
+        }
     }
 }

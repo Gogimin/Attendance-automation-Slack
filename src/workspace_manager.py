@@ -101,7 +101,13 @@ class WorkspaceConfig:
 
     @property
     def slack_channel_id(self) -> str:
+        """출석 채널 ID"""
         return self._config['slack_channel_id']
+
+    @property
+    def assignment_channel_id(self) -> Optional[str]:
+        """과제 채널 ID"""
+        return self._config.get('assignment_channel_id')
 
     @property
     def spreadsheet_id(self) -> str:
@@ -109,7 +115,18 @@ class WorkspaceConfig:
 
     @property
     def sheet_name(self) -> str:
+        """출석현황 시트 이름 (하위 호환성)"""
         return self._config['sheet_name']
+
+    @property
+    def attendance_sheet_name(self) -> str:
+        """출석현황 시트 이름"""
+        return self._config.get('sheet_name', '출석현황')
+
+    @property
+    def assignment_sheet_name(self) -> str:
+        """과제실습 모니터링 시트 이름"""
+        return self._config.get('assignment_sheet_name', '과제실습 모니터링')
 
     @property
     def name_column(self) -> int:
@@ -128,6 +145,23 @@ class WorkspaceConfig:
     @property
     def start_row(self) -> int:
         return self._config['start_row']
+
+    @property
+    def assignment_name_column(self) -> int:
+        """과제 시트 이름 열 (기본값: name_column과 동일)"""
+        col = self._config.get('assignment_name_column', self._config['name_column'])
+
+        if isinstance(col, str):
+            col = col.strip().upper()
+            if len(col) == 1 and 'A' <= col <= 'Z':
+                return ord(col) - ord('A')
+
+        return int(col)
+
+    @property
+    def assignment_start_row(self) -> int:
+        """과제 시트 시작 행 (기본값: start_row와 동일)"""
+        return self._config.get('assignment_start_row', self._config['start_row'])
 
     @property
     def credentials_path(self) -> str:

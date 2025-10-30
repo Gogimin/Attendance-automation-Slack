@@ -19,6 +19,7 @@ from src.workspace_manager import WorkspaceManager
 from src.slack_handler import SlackHandler
 from src.sheets_handler import SheetsHandler, AttendanceStatus
 from src.parser import AttendanceParser
+from src.assignment_parser import AssignmentParser
 from src.utils import parse_slack_thread_link, column_letter_to_index, get_next_column, column_index_to_letter
 
 # Flask 앱 초기화
@@ -135,8 +136,10 @@ def add_workspace():
         display_name = data['display_name'].strip()
         slack_bot_token = data['slack_bot_token'].strip()
         slack_channel_id = data['slack_channel_id'].strip()
+        assignment_channel_id = data.get('assignment_channel_id', '').strip()
         spreadsheet_id = data['spreadsheet_id'].strip()
         sheet_name = data.get('sheet_name', 'Sheet1').strip()
+        assignment_sheet_name = data.get('assignment_sheet_name', '과제실습 모니터링').strip()
         name_column = data.get('name_column', 'B').strip()
         start_row = int(data.get('start_row', 4))
         credentials_json = data['credentials_json']
@@ -159,8 +162,10 @@ def add_workspace():
             "name": display_name,
             "slack_bot_token": slack_bot_token,
             "slack_channel_id": slack_channel_id,
+            "assignment_channel_id": assignment_channel_id if assignment_channel_id else slack_channel_id,
             "spreadsheet_id": spreadsheet_id,
             "sheet_name": sheet_name,
+            "assignment_sheet_name": assignment_sheet_name,
             "name_column": name_column if name_column.isalpha() else 1,
             "start_row": start_row,
             "notification_user_id": "",
@@ -211,6 +216,93 @@ def add_workspace():
             'success': False,
             'error': str(e),
             'traceback': traceback.format_exc()
+        }), 500
+
+
+@app.route('/api/workspaces/edit/<workspace_name>', methods=['POST'])
+def edit_workspace(workspace_name):
+    """기존 워크스페이스 정보 수정"""
+    import json
+
+    try:
+        data = request.json
+
+        # 워크스페이스 확인
+        workspace = workspace_manager.get_workspace(workspace_name)
+        if not workspace:
+            return jsonify({
+                'success': False,
+                'error': '워크스페이스를 찾을 수 없습니다.'
+            }), 404
+
+        # 수정 가능한 필드들
+        assignment_channel_id = data.get('assignment_channel_id', '').strip()
+        assignment_sheet_name = data.get('assignment_sheet_name', '과제실습 모니터링').strip()
+
+        # config.json 업데이트
+        if assignment_channel_id:
+            workspace._config['assignment_channel_id'] = assignment_channel_id
+        else:
+            # 비어있으면 출석 채널과 동일하게 설정
+            workspace._config['assignment_channel_id'] = workspace._config['slack_channel_id']
+
+        workspace._config['assignment_sheet_name'] = assignment_sheet_name
+
+        # 파일 저장
+        with open(workspace.config_file, 'w', encoding='utf-8') as f:
+            json.dump(workspace._config, f, ensure_ascii=False, indent=2)
+
+        # 워크스페이스 매니저 리로드
+        workspace_manager.reload()
+
+        return jsonify({
+            'success': True,
+            'message': '워크스페이스 정보가 업데이트되었습니다.',
+            'updated_config': {
+                'assignment_channel_id': workspace._config.get('assignment_channel_id'),
+                'assignment_sheet_name': workspace._config.get('assignment_sheet_name')
+            }
+        })
+
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+
+@app.route('/api/workspaces/info/<workspace_name>', methods=['GET'])
+def get_workspace_info(workspace_name):
+    """워크스페이스 상세 정보 가져오기"""
+    try:
+        workspace = workspace_manager.get_workspace(workspace_name)
+        if not workspace:
+            return jsonify({
+                'success': False,
+                'error': '워크스페이스를 찾을 수 없습니다.'
+            }), 404
+
+        return jsonify({
+            'success': True,
+            'workspace': {
+                'name': workspace.name,
+                'display_name': workspace.display_name,
+                'slack_channel_id': workspace.slack_channel_id,
+                'assignment_channel_id': workspace._config.get('assignment_channel_id', ''),
+                'spreadsheet_id': workspace.spreadsheet_id,
+                'sheet_name': workspace.sheet_name,
+                'assignment_sheet_name': workspace._config.get('assignment_sheet_name', '과제실습 모니터링'),
+                'name_column': workspace._config.get('name_column'),
+                'start_row': workspace.start_row
+            }
+        })
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
         }), 500
 
 
@@ -660,6 +752,204 @@ def save_duplicate_names(workspace_name):
             'success': True,
             'message': '동명이인 정보가 저장되었습니다.',
             'converted_data': duplicate_names_with_user_id
+        })
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/run-assignment', methods=['POST'])
+def run_assignment_check():
+    """과제 체크 실행 + 구글 시트 업데이트 + 기록 저장"""
+    try:
+        data = request.json
+        workspace_name = data.get('workspace')
+        thread_input = data.get('thread_ts')
+        column_input = data.get('column', 'D').strip().upper()
+        mark_absent = data.get('mark_absent', True)
+
+        # 1. 워크스페이스 로드
+        workspace = workspace_manager.get_workspace(workspace_name)
+        if not workspace:
+            return jsonify({
+                'success': False,
+                'error': '워크스페이스를 찾을 수 없습니다.'
+            }), 404
+
+        # 2. 과제 채널 ID 확인
+        assignment_channel_id = workspace.assignment_channel_id
+        if not assignment_channel_id:
+            return jsonify({
+                'success': False,
+                'error': '과제 채널 ID가 설정되지 않았습니다. config.json에 assignment_channel_id를 추가하세요.'
+            }), 400
+
+        # 3. Thread TS 파싱
+        thread_ts = parse_slack_thread_link(thread_input)
+        if not thread_ts:
+            return jsonify({
+                'success': False,
+                'error': '올바른 Thread TS 형식이 아닙니다.'
+            }), 400
+
+        # 4. 열 변환
+        column_index = column_letter_to_index(column_input)
+        if column_index is None:
+            return jsonify({
+                'success': False,
+                'error': '올바른 열 형식이 아닙니다.'
+            }), 400
+
+        # 5. 슬랙 연결 및 댓글 수집
+        slack_handler = SlackHandler(workspace.slack_bot_token)
+        if not slack_handler.test_connection():
+            return jsonify({
+                'success': False,
+                'error': '슬랙 연결에 실패했습니다.'
+            }), 500
+
+        replies = slack_handler.get_replies_with_user_info(
+            assignment_channel_id,
+            thread_ts
+        )
+
+        if not replies:
+            return jsonify({
+                'success': False,
+                'error': '댓글을 가져올 수 없습니다.'
+            }), 500
+
+        # 6. 과제 제출자 파싱
+        parser = AssignmentParser()
+        submitted = parser.parse_assignment_replies(replies)
+
+        # 7. 구글 시트 연결 (과제실습 모니터링 시트에서 학생 명단 읽기)
+        sheets_handler = SheetsHandler(
+            credentials_path=workspace.credentials_path,
+            spreadsheet_id=workspace.spreadsheet_id,
+            sheet_name=workspace.assignment_sheet_name
+        )
+
+        if not sheets_handler.connect() or not sheets_handler.test_connection():
+            return jsonify({
+                'success': False,
+                'error': '구글 시트 연결에 실패했습니다.'
+            }), 500
+
+        # 8. 학생 명단 읽기 (과제실습 모니터링 시트에서)
+        students = sheets_handler.get_student_list(
+            workspace.name_column,
+            workspace.start_row
+        )
+
+        if not students:
+            return jsonify({
+                'success': False,
+                'error': '학생 명단을 읽을 수 없습니다.'
+            }), 500
+
+        # 9. 제출 여부 매칭
+        submitted_list = [name for name in students.keys() if name in submitted]
+        not_submitted_list = [name for name in students.keys() if name not in submitted]
+
+        # 10. 과제실습 모니터링 시트에 업데이트
+        success_count = sheets_handler.batch_update_assignment(
+            sheet_name=workspace.assignment_sheet_name,
+            column=column_index,
+            students=students,
+            submitted=submitted,
+            mark_absent=mark_absent
+        )
+
+        # 11. 기록 저장 (assignment_history.json)
+        import json
+        history_file = workspace.path / 'assignment_history.json'
+
+        # 기존 기록 읽기
+        if history_file.exists():
+            with open(history_file, 'r', encoding='utf-8') as f:
+                history_data = json.load(f)
+        else:
+            history_data = {'history': []}
+
+        # 새 기록 추가
+        record = {
+            'id': datetime.now(KST).strftime('%Y%m%d%H%M%S'),
+            'timestamp': datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S'),
+            'thread_ts': thread_ts,
+            'thread_link': thread_input,
+            'column': column_input,
+            'total_students': len(students),
+            'submitted_count': len(submitted_list),
+            'not_submitted_count': len(not_submitted_list),
+            'submitted_list': submitted_list,
+            'not_submitted_list': not_submitted_list
+        }
+
+        history_data['history'].insert(0, record)  # 최신 기록이 맨 앞에
+
+        # 최대 100개 기록만 유지
+        history_data['history'] = history_data['history'][:100]
+
+        # 파일 저장
+        with open(history_file, 'w', encoding='utf-8') as f:
+            json.dump(history_data, f, ensure_ascii=False, indent=2)
+
+        # 12. 결과 반환
+        return jsonify({
+            'success': True,
+            'result': {
+                'total_students': len(students),
+                'submitted': submitted_list,
+                'not_submitted': not_submitted_list,
+                'submitted_count': len(submitted_list),
+                'not_submitted_count': len(not_submitted_list),
+                'column': column_input,
+                'success_count': success_count
+            }
+        })
+
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+
+@app.route('/api/assignment-history/<workspace_name>', methods=['GET'])
+def get_assignment_history(workspace_name):
+    """과제 체크 기록 조회"""
+    try:
+        import json
+
+        workspace = workspace_manager.get_workspace(workspace_name)
+        if not workspace:
+            return jsonify({
+                'success': False,
+                'error': '워크스페이스를 찾을 수 없습니다.'
+            }), 404
+
+        history_file = workspace.path / 'assignment_history.json'
+
+        if not history_file.exists():
+            return jsonify({
+                'success': True,
+                'history': []
+            })
+
+        with open(history_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        history = data.get('history', [])
+
+        return jsonify({
+            'success': True,
+            'history': history
         })
 
     except Exception as e:

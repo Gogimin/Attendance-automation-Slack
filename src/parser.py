@@ -22,9 +22,13 @@ class AttendanceParser:
     def __init__(self):
         """AttendanceParser 초기화"""
         # 정규표현식 패턴 컴파일
-        # 패턴: "이름/출석" 또는 "이름 출석" 형태
+        # 패턴: "이름/" 또는 "이름 출석" 또는 "이름/출석" 형태 (유연하게)
+        # - "홍길동/" → 인정
+        # - "홍길동 출석" → 인정
+        # - "홍길동/출석" → 인정
+        # - "홍길동출석" → 인정
         self.pattern = re.compile(
-            r'([가-힣a-zA-Z]+)\s*[/\s]\s*(' + '|'.join(self.ATTENDANCE_KEYWORDS) + ')',
+            r'([가-힣a-zA-Z]+)\s*(?:[/]|(?:' + '|'.join(self.ATTENDANCE_KEYWORDS) + '))',
             re.IGNORECASE
         )
 
@@ -49,7 +53,7 @@ class AttendanceParser:
 
     def normalize_name(self, name: str) -> str:
         """
-        이름 정규화 (공백 제거, 대소문자 통일)
+        이름 정규화 (공백 제거, / 또는 _ 앞의 이름만 추출)
 
         Args:
             name (str): 원본 이름
@@ -57,7 +61,17 @@ class AttendanceParser:
         Returns:
             str: 정규화된 이름
         """
-        return name.strip()
+        name = name.strip()
+
+        # '/' 또는 '_' 앞의 이름만 추출
+        # 예: "홍길동/클스학과" → "홍길동"
+        # 예: "홍길동_클스학과" → "홍길동"
+        if '/' in name:
+            name = name.split('/')[0].strip()
+        elif '_' in name:
+            name = name.split('_')[0].strip()
+
+        return name
 
     def parse_attendance_replies(self, replies: List[Dict], duplicate_names: Dict = None) -> List[Dict]:
         """
@@ -105,7 +119,8 @@ class AttendanceParser:
                     for person in duplicate_names[name]:
                         print(f"    - 비교: {person.get('user_id')} vs {user_id}")
                         if person.get('user_id') == user_id:
-                            final_name = person.get('display_name', name)
+                            raw_display_name = person.get('display_name', name)
+                            final_name = self.normalize_name(raw_display_name)
                             sheet_row = person.get('sheet_row')
                             matched = True
                             print(f"  ✓ {final_name} (동명이인 매칭: {name} → {final_name}, 행: {sheet_row})")
@@ -143,7 +158,9 @@ class AttendanceParser:
 
                     # 실명 또는 표시 이름이 있고, 출석 키워드가 포함된 경우
                     if self._contains_attendance_keyword(text):
-                        fallback_name = display_name or real_name
+                        raw_fallback_name = display_name or real_name
+                        # / 또는 _ 앞의 이름만 추출
+                        fallback_name = self.normalize_name(raw_fallback_name) if raw_fallback_name else ''
 
                         if fallback_name and fallback_name not in seen_names:
                             attendance_list.append({
@@ -157,7 +174,7 @@ class AttendanceParser:
                             })
                             seen_names.add(fallback_name)
                             # seen_user_ids.add(user_id)  # [주석처리] 추후 필요 시 활성화
-                            print(f"  ✓ {fallback_name} - 출석 확인 (슬랙 이름 사용)")
+                            print(f"  ✓ {fallback_name} - 출석 확인 (슬랙 이름 사용: {raw_fallback_name})")
 
         print(f"\n✓ 출석 파싱 완료: {len(attendance_list)}명")
 
