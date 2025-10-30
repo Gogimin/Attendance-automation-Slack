@@ -417,12 +417,24 @@
                         <span class="modal-close">&times;</span>
                     </div>
                     <div class="modal-body">
-                        <input type="hidden" id="edit-workspace-name" />
+                        <input type="hidden" id="edit-workspace-name-hidden" />
 
                         <div class="form-group">
-                            <label>워크스페이스 이름</label>
-                            <p id="edit-workspace-display" style="margin: 5px 0; font-weight: bold; color: #333;"></p>
-                            <small>* 아래 필드만 수정 가능합니다</small>
+                            <label>워크스페이스 폴더 이름</label>
+                            <p id="edit-workspace-folder-name" style="margin: 5px 0; font-weight: bold; color: #333;"></p>
+                            <small>폴더 이름은 변경할 수 없습니다</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="edit-workspace-display-name">표시 이름</label>
+                            <input type="text" id="edit-workspace-display-name" class="form-control" placeholder="예: 이기니 워크스페이스">
+                            <small>웹 UI에 표시될 이름</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="edit-slack-channel-id">Slack Channel ID (출석)</label>
+                            <input type="text" id="edit-slack-channel-id" class="form-control" placeholder="C01234567">
+                            <small>출석체크를 진행할 채널의 ID</small>
                         </div>
 
                         <div class="form-group">
@@ -432,15 +444,41 @@
                         </div>
 
                         <div class="form-group">
+                            <label for="edit-sheet-name">시트 이름 (출석)</label>
+                            <input type="text" id="edit-sheet-name" class="form-control" placeholder="Sheet1">
+                            <small>출석 데이터가 있는 시트 탭 이름</small>
+                        </div>
+
+                        <div class="form-group">
                             <label for="edit-assignment-sheet-name">시트 이름 (과제)</label>
-                            <input type="text" id="edit-assignment-sheet-name" class="form-control" value="과제실습 모니터링">
+                            <input type="text" id="edit-assignment-sheet-name" class="form-control" placeholder="과제실습 모니터링">
                             <small>과제 데이터가 있는 시트 탭 이름</small>
                         </div>
 
-                        <div class="info-box" style="margin-top: 15px; background: #e3f2fd;">
-                            <p><strong>ℹ️ 안내</strong></p>
-                            <p style="font-size: 0.9rem; margin: 5px 0;">• 구버전 config.json을 사용 중이라면 이 기능으로 과제 관련 필드를 추가할 수 있습니다.</p>
-                            <p style="font-size: 0.9rem; margin: 5px 0;">• 다른 필드를 수정하려면 직접 config.json 파일을 편집하세요.</p>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="edit-name-column">이름 열</label>
+                                <input type="text" id="edit-name-column" class="form-control small" maxlength="2" placeholder="B">
+                                <small>학생 이름이 있는 열</small>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="edit-start-row">시작 행</label>
+                                <input type="number" id="edit-start-row" class="form-control small" min="1" placeholder="4">
+                                <small>데이터 시작 행 번호</small>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="edit-notification-user-id">알림 수신자</label>
+                            <input type="text" id="edit-notification-user-id" class="form-control" placeholder="이메일 또는 User ID">
+                            <small>자동 실행 알림을 받을 사용자 (선택사항)</small>
+                        </div>
+
+                        <div class="info-box" style="margin-top: 15px; background: #fff3cd;">
+                            <p><strong>⚠️ 주의</strong></p>
+                            <p style="font-size: 0.9rem; margin: 5px 0;">• Slack Bot Token, Spreadsheet ID, Credentials는 보안상 이유로 수정할 수 없습니다.</p>
+                            <p style="font-size: 0.9rem; margin: 5px 0;">• 이 항목들을 변경하려면 config.json 파일을 직접 편집하세요.</p>
                         </div>
                     </div>
                     <div class="modal-footer">

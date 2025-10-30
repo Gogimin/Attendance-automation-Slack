@@ -637,20 +637,41 @@ async function loadAllSchedules() {
             });
 
             let html = '';
+            let globalScheduleIndex = 0;  // 전역 인덱스 추적
+
             for (const wsName in grouped) {
                 const schedules = grouped[wsName];
-                html += '<div style="margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 10px; background: #f9f9f9;">';
+                const folderName = schedules[0].folder_name;
+                const isEnabled = schedules[0].enabled;
+
+                // 비활성화된 경우 회색 배경
+                const containerBgColor = isEnabled ? '#f9f9f9' : '#f0f0f0';
+                const containerBorder = isEnabled ? '1px solid #ddd' : '1px solid #999';
+                const opacity = isEnabled ? '1' : '0.7';
+
+                html += '<div style="margin-bottom: 20px; padding: 15px; border: ' + containerBorder + '; border-radius: 10px; background: ' + containerBgColor + '; opacity: ' + opacity + ';">';
                 html += '<div style="display: flex; justify-content: space-between; align-items: center;">';
-                html += '<h3 style="margin: 0 0 10px 0;">' + wsName + '</h3>';
-                html += '<button class="btn btn-secondary" onclick="editScheduleFromStatus(\'' + schedules[0].folder_name + '\')" style="padding: 5px 15px;">✏️ 수정</button>';
+                html += '<h3 style="margin: 0 0 10px 0;">' + wsName + ' <span style="font-size: 0.8rem; color: ' + (isEnabled ? '#28a745' : '#dc3545') + '; font-weight: bold;">(' + (isEnabled ? '✓ 활성' : '⏸️ 일시정지') + ')</span></h3>';
+                html += '<div>';
+                html += '<button class="btn btn-secondary" onclick="editScheduleFromStatus(\'' + folderName + '\')" style="padding: 5px 15px; margin-right: 5px;">✏️ 수정</button>';
+                html += '<button class="btn ' + (isEnabled ? 'btn-warning' : 'btn-success') + '" onclick="toggleSchedule(\'' + folderName + '\')" style="padding: 5px 15px;">' + (isEnabled ? '⏸️ 일시정지' : '▶️ 활성화') + '</button>';
+                html += '</div>';
                 html += '</div>';
 
-                schedules.forEach(function(schedule) {
+                schedules.forEach(function(schedule, localIndex) {
                     const day = dayNames[schedule.day] || schedule.day;
-                    html += '<div style="padding: 10px; margin-top: 10px; background: white; border-radius: 5px;">';
+                    const itemBgColor = isEnabled ? 'white' : '#e8e8e8';
+                    html += '<div style="padding: 10px; margin-top: 10px; background: ' + itemBgColor + '; border-radius: 5px; display: flex; justify-content: space-between; align-items: center;">';
+                    html += '<div>';
                     html += '<strong>' + day + '요일</strong><br>';
                     html += '스레드 생성: ' + schedule.create_thread_time + ' | 집계: ' + schedule.check_attendance_time + ' | 열: ' + schedule.check_attendance_column;
+                    if (!isEnabled) {
+                        html += '<br><small style="color: #999;">⏸️ 일시정지됨 (실행되지 않음)</small>';
+                    }
                     html += '</div>';
+                    html += '<button class="btn btn-danger" onclick="deleteScheduleItem(\'' + folderName + '\', ' + localIndex + ')" style="padding: 3px 10px;">🗑️ 삭제</button>';
+                    html += '</div>';
+                    globalScheduleIndex++;
                 });
 
                 html += '</div>';
@@ -1198,6 +1219,61 @@ function editScheduleFromStatus(workspaceName) {
     openEditScheduleModal(workspaceName);
 }
 
+// 스케줄 아이템 삭제
+async function deleteScheduleItem(workspaceName, scheduleIndex) {
+    if (!confirm('이 스케줄을 삭제하시겠습니까?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/schedule/delete', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                workspace: workspaceName,
+                schedule_index: scheduleIndex
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            alert('✅ 스케줄이 삭제되었습니다!');
+            // 예약 현황 새로고침
+            loadAllSchedules();
+        } else {
+            alert('❌ 오류: ' + data.error);
+        }
+    } catch (error) {
+        alert('❌ 오류: ' + error.message);
+    }
+}
+
+// 스케줄 활성화/비활성화 토글
+async function toggleSchedule(workspaceName) {
+    try {
+        const response = await fetch('/api/schedule/toggle', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                workspace: workspaceName
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            alert('✅ ' + data.message);
+            // 예약 현황 새로고침
+            loadAllSchedules();
+        } else {
+            alert('❌ 오류: ' + data.error);
+        }
+    } catch (error) {
+        alert('❌ 오류: ' + error.message);
+    }
+}
+
 // 스케줄 수정 모달 열기
 async function openEditScheduleModal(workspaceName) {
     try {
@@ -1309,6 +1385,147 @@ async function submitEditSchedule() {
         }
     } catch (error) {
         alert('❌ 스케줄 수정 오류:\n\n' + error.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+    }
+}
+
+// ========================================
+// 워크스페이스 수정 기능
+// ========================================
+
+async function openEditWorkspaceModal() {
+    const workspaceName = document.getElementById('workspace-select').value;
+    if (!workspaceName) {
+        alert('워크스페이스를 먼저 선택하세요.');
+        return;
+    }
+
+    // 기존 정보 로드
+    try {
+        const response = await fetch(`/api/workspaces/info/${workspaceName}`);
+        const data = await response.json();
+
+        if (data.success) {
+            const workspace = data.workspace;
+
+            // 모달에 정보 표시 (null 체크)
+            const setValueSafe = (id, value) => {
+                const element = document.getElementById(id);
+                if (element) {
+                    if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA' || element.tagName === 'SELECT') {
+                        element.value = value || '';
+                    } else {
+                        element.textContent = value || '';
+                    }
+                } else {
+                    console.warn(`Element not found: ${id}`);
+                }
+            };
+
+            setValueSafe('edit-workspace-name-hidden', workspaceName);
+            setValueSafe('edit-workspace-folder-name', workspace.name);
+            setValueSafe('edit-workspace-display-name', workspace.display_name);
+            setValueSafe('edit-slack-channel-id', workspace.slack_channel_id);
+            setValueSafe('edit-assignment-channel-id', workspace.assignment_channel_id);
+            setValueSafe('edit-sheet-name', workspace.sheet_name || 'Sheet1');
+            setValueSafe('edit-assignment-sheet-name', workspace.assignment_sheet_name || '과제실습 모니터링');
+            setValueSafe('edit-name-column', workspace.name_column || 'B');
+            setValueSafe('edit-start-row', workspace.start_row || 4);
+            setValueSafe('edit-notification-user-id', workspace.notification_user_id);
+
+            // 모달 표시
+            const modal = document.getElementById('edit-workspace-modal');
+            if (modal) {
+                modal.style.display = 'flex';
+            } else {
+                console.error('Modal not found: edit-workspace-modal');
+                alert('워크스페이스 수정 모달을 찾을 수 없습니다. 페이지를 새로고침해주세요.');
+            }
+        } else {
+            alert('워크스페이스 정보 로드 실패: ' + data.error);
+        }
+    } catch (error) {
+        alert('오류: ' + error.message);
+    }
+}
+
+function closeEditWorkspaceModal() {
+    document.getElementById('edit-workspace-modal').style.display = 'none';
+}
+
+async function saveEditWorkspace() {
+    const workspaceName = document.getElementById('edit-workspace-name-hidden').value;
+    const displayName = document.getElementById('edit-workspace-display-name').value.trim();
+    const slackChannelId = document.getElementById('edit-slack-channel-id').value.trim();
+    const assignmentChannelId = document.getElementById('edit-assignment-channel-id').value.trim();
+    const sheetName = document.getElementById('edit-sheet-name').value.trim();
+    const assignmentSheetName = document.getElementById('edit-assignment-sheet-name').value.trim();
+    const nameColumn = document.getElementById('edit-name-column').value.trim();
+    const startRow = parseInt(document.getElementById('edit-start-row').value);
+    const notificationUserId = document.getElementById('edit-notification-user-id').value.trim();
+
+    // 필수 항목 검증
+    if (!displayName) {
+        alert('표시 이름은 필수입니다.');
+        return;
+    }
+    if (!slackChannelId) {
+        alert('Slack Channel ID (출석)는 필수입니다.');
+        return;
+    }
+    if (!sheetName) {
+        alert('시트 이름 (출석)은 필수입니다.');
+        return;
+    }
+    if (!assignmentSheetName) {
+        alert('시트 이름 (과제)은 필수입니다.');
+        return;
+    }
+    if (!nameColumn) {
+        alert('이름 열은 필수입니다.');
+        return;
+    }
+    if (isNaN(startRow) || startRow < 1) {
+        alert('시작 행은 1 이상의 숫자여야 합니다.');
+        return;
+    }
+
+    const btn = document.getElementById('save-edit-workspace-btn');
+    const originalText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '⏳ 저장 중...';
+
+    try {
+        const response = await fetch(`/api/workspaces/edit/${workspaceName}`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                display_name: displayName,
+                slack_channel_id: slackChannelId,
+                assignment_channel_id: assignmentChannelId,
+                sheet_name: sheetName,
+                assignment_sheet_name: assignmentSheetName,
+                name_column: nameColumn,
+                start_row: startRow,
+                notification_user_id: notificationUserId
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            alert('✅ 워크스페이스 정보가 수정되었습니다!');
+            closeEditWorkspaceModal();
+
+            // 워크스페이스 목록 새로고침
+            loadWorkspaces();
+        } else {
+            alert('❌ 오류: ' + data.error);
+        }
+    } catch (error) {
+        alert('❌ 오류: ' + error.message);
     } finally {
         btn.disabled = false;
         btn.innerHTML = originalText;

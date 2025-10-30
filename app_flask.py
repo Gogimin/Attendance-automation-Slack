@@ -25,6 +25,8 @@ from src.utils import parse_slack_thread_link, column_letter_to_index, get_next_
 # Flask 앱 초기화
 app = Flask(__name__)
 app.config['JSON_AS_ASCII'] = False  # 한글 지원
+app.config['TEMPLATES_AUTO_RELOAD'] = True  # 템플릿 자동 리로드
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0  # 정적 파일 캐싱 비활성화
 
 # 워크스페이스 매니저 초기화
 workspace_manager = WorkspaceManager()
@@ -236,17 +238,42 @@ def edit_workspace(workspace_name):
             }), 404
 
         # 수정 가능한 필드들
+        display_name = data.get('display_name', '').strip()
+        slack_channel_id = data.get('slack_channel_id', '').strip()
         assignment_channel_id = data.get('assignment_channel_id', '').strip()
-        assignment_sheet_name = data.get('assignment_sheet_name', '과제실습 모니터링').strip()
+        sheet_name = data.get('sheet_name', '').strip()
+        assignment_sheet_name = data.get('assignment_sheet_name', '').strip()
+        name_column = data.get('name_column', '').strip()
+        start_row = data.get('start_row')
+        notification_user_id = data.get('notification_user_id', '').strip()
 
         # config.json 업데이트
+        if display_name:
+            workspace._config['name'] = display_name
+
+        if slack_channel_id:
+            workspace._config['slack_channel_id'] = slack_channel_id
+
         if assignment_channel_id:
             workspace._config['assignment_channel_id'] = assignment_channel_id
         else:
             # 비어있으면 출석 채널과 동일하게 설정
             workspace._config['assignment_channel_id'] = workspace._config['slack_channel_id']
 
-        workspace._config['assignment_sheet_name'] = assignment_sheet_name
+        if sheet_name:
+            workspace._config['sheet_name'] = sheet_name
+
+        if assignment_sheet_name:
+            workspace._config['assignment_sheet_name'] = assignment_sheet_name
+
+        if name_column:
+            workspace._config['name_column'] = name_column
+
+        if start_row is not None:
+            workspace._config['start_row'] = int(start_row)
+
+        # notification_user_id는 빈 값도 허용
+        workspace._config['notification_user_id'] = notification_user_id
 
         # 파일 저장
         with open(workspace.config_file, 'w', encoding='utf-8') as f:
@@ -258,10 +285,7 @@ def edit_workspace(workspace_name):
         return jsonify({
             'success': True,
             'message': '워크스페이스 정보가 업데이트되었습니다.',
-            'updated_config': {
-                'assignment_channel_id': workspace._config.get('assignment_channel_id'),
-                'assignment_sheet_name': workspace._config.get('assignment_sheet_name')
-            }
+            'updated_config': workspace._config
         })
 
     except Exception as e:
@@ -295,7 +319,8 @@ def get_workspace_info(workspace_name):
                 'sheet_name': workspace.sheet_name,
                 'assignment_sheet_name': workspace._config.get('assignment_sheet_name', '과제실습 모니터링'),
                 'name_column': workspace._config.get('name_column'),
-                'start_row': workspace.start_row
+                'start_row': workspace.start_row,
+                'notification_user_id': workspace._config.get('notification_user_id', '')
             }
         })
 
@@ -584,19 +609,24 @@ def get_all_schedules():
         for workspace in workspaces:
             schedule_config = workspace.auto_schedule
 
-            if schedule_config and schedule_config.get('enabled'):
+            # enabled 여부와 관계없이 스케줄이 있으면 표시
+            if schedule_config:
                 schedules_list = schedule_config.get('schedules', [])
+                enabled = schedule_config.get('enabled', False)
 
-                for schedule_item in schedules_list:
-                    result_schedules.append({
-                        'workspace_name': workspace.display_name,
-                        'folder_name': workspace.name,
-                        'day': schedule_item.get('day', ''),
-                        'create_thread_time': schedule_item.get('create_thread_time', ''),
-                        'check_attendance_time': schedule_item.get('check_attendance_time', ''),
-                        'check_attendance_column': schedule_item.get('check_attendance_column', ''),
-                        'notification_user_id': workspace.notification_user_id or ''
-                    })
+                # 스케줄 리스트가 비어있지 않을 때만 표시
+                if schedules_list:
+                    for schedule_item in schedules_list:
+                        result_schedules.append({
+                            'workspace_name': workspace.display_name,
+                            'folder_name': workspace.name,
+                            'day': schedule_item.get('day', ''),
+                            'create_thread_time': schedule_item.get('create_thread_time', ''),
+                            'check_attendance_time': schedule_item.get('check_attendance_time', ''),
+                            'check_attendance_column': schedule_item.get('check_attendance_column', ''),
+                            'notification_user_id': workspace.notification_user_id or '',
+                            'enabled': enabled
+                        })
 
         return jsonify({
             'success': True,
@@ -646,6 +676,118 @@ def save_schedule():
         return jsonify({
             'success': True,
             'message': '스케줄이 저장되었습니다.'
+        })
+
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+
+@app.route('/api/schedule/delete', methods=['POST'])
+def delete_schedule():
+    """특정 스케줄 아이템 삭제"""
+    try:
+        data = request.json
+        workspace_name = data.get('workspace')
+        schedule_index = data.get('schedule_index')  # 삭제할 스케줄의 인덱스
+
+        workspace = workspace_manager.get_workspace(workspace_name)
+        if not workspace:
+            return jsonify({
+                'success': False,
+                'error': '워크스페이스를 찾을 수 없습니다.'
+            }), 404
+
+        schedule_config = workspace.auto_schedule
+        if not schedule_config:
+            return jsonify({
+                'success': False,
+                'error': '스케줄 설정이 없습니다.'
+            }), 404
+
+        schedules_list = schedule_config.get('schedules', [])
+
+        if schedule_index < 0 or schedule_index >= len(schedules_list):
+            return jsonify({
+                'success': False,
+                'error': '잘못된 스케줄 인덱스입니다.'
+            }), 400
+
+        # 스케줄 삭제
+        deleted_schedule = schedules_list.pop(schedule_index)
+
+        # 모든 스케줄이 삭제되면 enabled를 False로
+        if not schedules_list:
+            schedule_config['enabled'] = False
+
+        # 저장
+        if not workspace.save_schedule(schedule_config):
+            return jsonify({
+                'success': False,
+                'error': '스케줄 저장에 실패했습니다.'
+            }), 500
+
+        # 스케줄러 재시작
+        restart_scheduler()
+
+        return jsonify({
+            'success': True,
+            'message': '스케줄이 삭제되었습니다.',
+            'deleted_schedule': deleted_schedule
+        })
+
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+
+@app.route('/api/schedule/toggle', methods=['POST'])
+def toggle_schedule():
+    """스케줄 활성화/비활성화 토글"""
+    try:
+        data = request.json
+        workspace_name = data.get('workspace')
+
+        workspace = workspace_manager.get_workspace(workspace_name)
+        if not workspace:
+            return jsonify({
+                'success': False,
+                'error': '워크스페이스를 찾을 수 없습니다.'
+            }), 404
+
+        schedule_config = workspace.auto_schedule
+        if not schedule_config:
+            return jsonify({
+                'success': False,
+                'error': '스케줄 설정이 없습니다.'
+            }), 404
+
+        # 활성화/비활성화 토글
+        current_enabled = schedule_config.get('enabled', False)
+        schedule_config['enabled'] = not current_enabled
+
+        # 저장
+        if not workspace.save_schedule(schedule_config):
+            return jsonify({
+                'success': False,
+                'error': '스케줄 저장에 실패했습니다.'
+            }), 500
+
+        # 스케줄러 재시작
+        restart_scheduler()
+
+        return jsonify({
+            'success': True,
+            'message': f'스케줄이 {"활성화" if schedule_config["enabled"] else "비활성화"}되었습니다.',
+            'enabled': schedule_config['enabled']
         })
 
     except Exception as e:
