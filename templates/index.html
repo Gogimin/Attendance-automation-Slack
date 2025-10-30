@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>슬랙 출석체크 관리 시스템</title>
+    <title>슬랙 출석체크 자동화 시스템 v3.0</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <style>
         /* 이모지 폰트 보정 */
@@ -16,20 +16,24 @@
 <body>
     <div class="container">
         <header>
-            <h1><span class="emoji">📊</span> 슬랙 출석체크 관리 시스템</h1>
-            <p class="subtitle">여러 워크스페이스를 한 곳에서 관리하세요</p>
+            <div class="header-icon">
+                <span class="emoji">📊</span>
+            </div>
+            <h1>슬랙 출석체크 자동화 시스템 <span class="version-badge">v3.0</span></h1>
+            <p class="subtitle">Made with Flask & Python</p>
+            <p class="subtitle-small">여러 워크스페이스를 한 곳에서 관리하세요</p>
         </header>
 
         <!-- 탭 네비게이션 -->
         <div class="tabs">
             <button class="tab active" data-tab="attendance">
-                📋 출석체크
+                <span>📋 출석체크</span>
             </button>
             <button class="tab" data-tab="assignment">
-                📝 과제체크
+                <span>📝 과제체크</span>
             </button>
             <button class="tab" data-tab="info">
-                📊 정보조회
+                <span>📊 정보조회</span>
             </button>
         </div>
 
@@ -672,7 +676,7 @@
         </div>
 
         <footer>
-            <p>슬랙 출석체크 자동화 시스템 v2.0</p>
+            <p>슬랙 출석체크 자동화 시스템 v3.0</p>
             <p>Made with Flask & Python</p>
         </footer>
     </div>
