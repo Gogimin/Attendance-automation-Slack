@@ -2056,14 +2056,23 @@ async function loadScheduleInfo(workspace) {
             const schedule = data.schedule;
             const schedules = schedule.schedules || [];
 
+            // 요일 한글 변환
+            const dayNames = {
+                'mon': '월', 'tue': '화', 'wed': '수', 'thu': '목',
+                'fri': '금', 'sat': '토', 'sun': '일'
+            };
+
             if (schedules.length > 0) {
-                scheduleDetails.innerHTML = schedules.map(item => `
+                scheduleDetails.innerHTML = schedules.map(item => {
+                    const dayKorean = dayNames[item.day] || item.day;
+                    return `
                     <div class="info-box" style="margin-bottom: 15px;">
-                        <p><strong>📌 ${item.day || '매주'}</strong></p>
+                        <p><strong>📌 ${dayKorean}요일</strong></p>
                         ${item.create_thread_time ? `<p>• 출석 스레드 생성: ${item.create_thread_time}</p>` : ''}
                         ${item.check_attendance_time ? `<p>• 출석 집계: ${item.check_attendance_time} (${item.check_attendance_column || ''}열)</p>` : ''}
                     </div>
-                `).join('');
+                `;
+                }).join('');
                 scheduleSection.style.display = 'block';
             }
         } else {
