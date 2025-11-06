@@ -50,13 +50,12 @@ class SheetsHandler:
                 scopes=self.SCOPES
             )
             self.service = build('sheets', 'v4', credentials=credentials)
-            print("✓ Google Sheets API 연결 성공!")
             return True
         except FileNotFoundError:
-            print(f"✗ 인증 파일을 찾을 수 없습니다: {self.credentials_path}")
+            print(f"✗ 인증 파일 없음: {self.credentials_path}")
             return False
         except Exception as e:
-            print(f"✗ Google Sheets API 연결 실패: {e}")
+            print(f"✗ Google Sheets 연결 실패: {e}")
             return False
 
     def test_connection(self) -> bool:
@@ -75,25 +74,20 @@ class SheetsHandler:
                 spreadsheetId=self.spreadsheet_id
             ).execute()
 
-            title = sheet_metadata.get('properties', {}).get('title', 'Unknown')
-            print(f"✓ 스프레드시트 접근 성공!")
-            print(f"  - 제목: {title}")
-            print(f"  - ID: {self.spreadsheet_id}")
-
             # 시트 목록 확인
             sheets = sheet_metadata.get('sheets', [])
             sheet_names = [s['properties']['title'] for s in sheets]
-            print(f"  - 시트 목록: {', '.join(sheet_names)}")
 
             if self.sheet_name not in sheet_names:
-                print(f"⚠ 경고: '{self.sheet_name}' 시트를 찾을 수 없습니다.")
+                title = sheet_metadata.get('properties', {}).get('title', 'Unknown')
+                print(f"✗ 시트 없음: '{self.sheet_name}' (스프레드시트: {title})")
                 return False
 
             return True
 
         except HttpError as e:
-            print(f"✗ 스프레드시트 접근 실패: {e}")
-            print("  - 서비스 계정에 스프레드시트 공유 권한이 있는지 확인하세요.")
+            print(f"✗ 스프레드시트 접근 실패")
+            print(f"   상세: {e}")
             return False
         except Exception as e:
             print(f"✗ 연결 테스트 실패: {e}")
@@ -111,7 +105,6 @@ class SheetsHandler:
             Dict[str, int]: {학생이름: 행번호} 매핑 딕셔너리
         """
         if not self.service:
-            print("✗ API가 연결되지 않았습니다. connect()를 먼저 호출하세요.")
             return {}
 
         try:
@@ -119,9 +112,6 @@ class SheetsHandler:
             col_letter = chr(65 + name_column)  # 0 -> A, 1 -> B, ...
             start_row_num = start_row + 1  # 0-based -> 1-based
             range_name = f"{self.sheet_name}!{col_letter}{start_row_num}:{col_letter}"
-
-            print(f"\n[Google Sheets] 학생 명단 읽기 중...")
-            print(f"  - 범위: {range_name}")
 
             result = self.service.spreadsheets().values().get(
                 spreadsheetId=self.spreadsheet_id,
@@ -131,7 +121,7 @@ class SheetsHandler:
             values = result.get('values', [])
 
             if not values:
-                print("✗ 학생 명단이 비어있습니다.")
+                print(f"✗ 학생 명단 없음")
                 return {}
 
             # {이름: 행번호} 매핑
@@ -143,15 +133,17 @@ class SheetsHandler:
                         row_number = start_row + i  # 0-based 행 번호
                         student_dict[name] = row_number
 
-            print(f"✓ 학생 명단 읽기 완료: {len(student_dict)}명")
+            print(f"✓ 학생 명단: {len(student_dict)}명")
 
             return student_dict
 
         except HttpError as e:
-            print(f"✗ 학생 명단 읽기 실패: {e}")
+            print(f"✗ 학생 명단 읽기 실패")
+            print(f"   범위: {range_name}")
+            print(f"   상세: {e}")
             return {}
         except Exception as e:
-            print(f"✗ 오류 발생: {e}")
+            print(f"✗ 오류: {e}")
             return {}
 
     def update_attendance(self, row_number: int, column: int, status: AttendanceStatus = AttendanceStatus.PRESENT) -> bool:
@@ -200,7 +192,7 @@ class SheetsHandler:
 
     def batch_update_attendance(self, updates: List[Dict]) -> int:
         """
-        여러 학생의 출석을 한번에 업데이트 (배치 처리)
+        여러 학생의 출석을 한번에 업데이트 (진짜 배치 처리)
 
         Args:
             updates (List[Dict]): 업데이트 정보 리스트
@@ -212,9 +204,75 @@ class SheetsHandler:
         if not self.service or not updates:
             return 0
 
-        print(f"\n[Google Sheets] 출석 체크 업데이트 중...")
+        try:
+            # batchUpdate API를 위한 데이터 준비
+            batch_data = []
 
+            for update in updates:
+                name = update.get('name')
+                row = update.get('row')
+                column = update.get('column')
+                status = update.get('status', AttendanceStatus.PRESENT)
+
+                if row is None or column is None:
+                    continue
+
+                # A1 notation으로 변환
+                col_letter = chr(65 + column)  # 0 -> A, 1 -> B, ...
+                row_num = row + 1  # 0-based -> 1-based
+                cell_range = f"{self.sheet_name}!{col_letter}{row_num}"
+
+                # 출석 상태 문자 (O, X, △)
+                status_value = status.value if isinstance(status, AttendanceStatus) else status
+
+                batch_data.append({
+                    'range': cell_range,
+                    'values': [[status_value]]
+                })
+
+            # 한 번의 API 호출로 모든 셀 업데이트
+            if batch_data:
+                body = {
+                    'data': batch_data,
+                    'valueInputOption': 'USER_ENTERED'
+                }
+
+                result = self.service.spreadsheets().values().batchUpdate(
+                    spreadsheetId=self.spreadsheet_id,
+                    body=body
+                ).execute()
+
+                # 업데이트된 셀 개수
+                updated_cells = result.get('totalUpdatedCells', 0)
+                print(f"✓ 출석 체크 완료: {updated_cells}명")
+
+                return updated_cells
+            else:
+                return 0
+
+        except HttpError as e:
+            print(f"✗ 출석 업데이트 실패")
+            print(f"   에러 코드: {e.resp.status}")
+            print(f"   상세: {e.error_details if hasattr(e, 'error_details') else str(e)}")
+            # 에러 발생 시 개별 업데이트로 폴백
+            print(f"   재시도 중...")
+            return self._fallback_individual_update(updates)
+        except Exception as e:
+            print(f"✗ 출석 업데이트 오류: {e}")
+            return 0
+
+    def _fallback_individual_update(self, updates: List[Dict]) -> int:
+        """
+        배치 업데이트 실패 시 개별 업데이트로 폴백
+
+        Args:
+            updates (List[Dict]): 업데이트 정보 리스트
+
+        Returns:
+            int: 성공한 업데이트 수
+        """
         success_count = 0
+        failed_names = []
 
         for update in updates:
             name = update.get('name')
@@ -226,16 +284,16 @@ class SheetsHandler:
                 continue
 
             if self.update_attendance(row, column, status):
-                status_str = status.value if isinstance(status, AttendanceStatus) else status
-                print(f"  ✓ {name} - {status_str} 업데이트 완료")
                 success_count += 1
             else:
-                print(f"  ✗ {name} - 업데이트 실패")
+                failed_names.append(name)
 
             # API Rate Limiting 방지
-            time.sleep(0.1)
+            time.sleep(0.2)
 
-        print(f"\n✓ 출석 체크 완료: {success_count}/{len(updates)}명")
+        print(f"✓ 출석 체크 완료: {success_count}명")
+        if failed_names:
+            print(f"   실패: {', '.join(failed_names)}")
 
         return success_count
 
@@ -284,7 +342,7 @@ class SheetsHandler:
     def batch_update_assignment(self, sheet_name: str, column: int, students: Dict[str, int],
                                 submitted: List[str], mark_absent: bool = True) -> int:
         """
-        과제실습 모니터링 시트에 O/X 표시 (배치 처리)
+        과제실습 모니터링 시트에 O/X 표시 (진짜 배치 처리)
 
         Args:
             sheet_name (str): 시트 이름 (예: "과제실습 모니터링")
@@ -299,35 +357,58 @@ class SheetsHandler:
         if not self.service or not students:
             return 0
 
-        print(f"\n[Google Sheets] 과제 제출 현황 업데이트 중...")
-        print(f"  - 시트: {sheet_name}")
-        print(f"  - 열: {chr(65 + column) if column < 26 else '??'}")
+        try:
+            # batchUpdate API를 위한 데이터 준비
+            batch_data = []
 
-        success_count = 0
-
-        for student_name, row in students.items():
-            if student_name in submitted:
-                value = "O"
-                status_text = "제출"
-            else:
-                if mark_absent:
-                    value = "X"
-                    status_text = "미제출"
+            for student_name, row in students.items():
+                if student_name in submitted:
+                    value = "O"
                 else:
-                    continue  # 미제출자 표시 안함
+                    if mark_absent:
+                        value = "X"
+                    else:
+                        continue  # 미제출자 표시 안함
 
-            if self.update_assignment(sheet_name, row, column, value):
-                print(f"  ✓ {student_name} - {status_text} ({value})")
-                success_count += 1
+                # A1 notation으로 변환
+                col_letter = chr(65 + column) if column < 26 else chr(65 + column // 26 - 1) + chr(65 + column % 26)
+                row_num = row + 1  # 0-based -> 1-based
+                cell_range = f"{sheet_name}!{col_letter}{row_num}"
+
+                batch_data.append({
+                    'range': cell_range,
+                    'values': [[value]]
+                })
+
+            # 한 번의 API 호출로 모든 셀 업데이트
+            if batch_data:
+                body = {
+                    'data': batch_data,
+                    'valueInputOption': 'USER_ENTERED'
+                }
+
+                result = self.service.spreadsheets().values().batchUpdate(
+                    spreadsheetId=self.spreadsheet_id,
+                    body=body
+                ).execute()
+
+                # 업데이트된 셀 개수
+                updated_cells = result.get('totalUpdatedCells', 0)
+                print(f"✓ 과제 체크 완료: {updated_cells}명")
+
+                return updated_cells
             else:
-                print(f"  ✗ {student_name} - 업데이트 실패")
+                return 0
 
-            # API Rate Limiting 방지
-            time.sleep(0.1)
-
-        print(f"\n✓ 과제 체크 완료: {success_count}/{len(students)}명")
-
-        return success_count
+        except HttpError as e:
+            print(f"✗ 과제 업데이트 실패")
+            print(f"   시트: {sheet_name}, 열: {chr(65 + column) if column < 26 else '??'}")
+            print(f"   에러 코드: {e.resp.status}")
+            print(f"   상세: {e.error_details if hasattr(e, 'error_details') else str(e)}")
+            return 0
+        except Exception as e:
+            print(f"✗ 과제 업데이트 오류: {e}")
+            return 0
 
 
 # 테스트 코드
