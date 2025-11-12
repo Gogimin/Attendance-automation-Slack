@@ -118,7 +118,7 @@ def add_workspace():
     assignment_channel_id = data.get('assignment_channel_id', '').strip()
     spreadsheet_id = data['spreadsheet_id'].strip()
     sheet_name = data.get('sheet_name', 'Sheet1').strip()
-    assignment_sheet_name = data.get('assignment_sheet_name', '과제실습 모니터링').strip()
+    assignment_sheet_name = data.get('assignment_sheet_name', '실습과제현황').strip()
     name_column = data.get('name_column', 'B').strip()
     start_row = int(data.get('start_row', 4))
     credentials_json = data['credentials_json']
@@ -271,7 +271,7 @@ def get_workspace_info(workspace_name):
             'assignment_channel_id': workspace._config.get('assignment_channel_id', ''),
             'spreadsheet_id': workspace.spreadsheet_id,
             'sheet_name': workspace.sheet_name,
-            'assignment_sheet_name': workspace._config.get('assignment_sheet_name', '과제실습 모니터링'),
+            'assignment_sheet_name': workspace._config.get('assignment_sheet_name', '실습과제현황'),
             'name_column': workspace._config.get('name_column'),
             'start_row': workspace.start_row,
             'notification_user_id': workspace._config.get('notification_user_id', '')

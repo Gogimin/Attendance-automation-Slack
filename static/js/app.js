@@ -923,7 +923,7 @@ function loadCredentialsFile(event) {
 // 모달 열기
 function openAddWorkspaceModal() {
     const modal = document.getElementById('add-workspace-modal');
-    modal.style.display = 'block';
+    modal.style.display = 'flex';
     clearAddWorkspaceForm();
 }
 
@@ -1430,7 +1430,7 @@ async function openEditWorkspaceModal() {
             setValueSafe('edit-slack-channel-id', workspace.slack_channel_id);
             setValueSafe('edit-assignment-channel-id', workspace.assignment_channel_id);
             setValueSafe('edit-sheet-name', workspace.sheet_name || 'Sheet1');
-            setValueSafe('edit-assignment-sheet-name', workspace.assignment_sheet_name || '과제실습 모니터링');
+            setValueSafe('edit-assignment-sheet-name', workspace.assignment_sheet_name || '실습과제현황');
             setValueSafe('edit-name-column', workspace.name_column || 'B');
             setValueSafe('edit-start-row', workspace.start_row || 4);
             setValueSafe('edit-notification-user-id', workspace.notification_user_id);

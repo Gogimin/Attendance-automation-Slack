@@ -62,6 +62,8 @@ class AssignmentParser:
             "홍길동_클스학과" → "홍길동"
             "홍길동" → "홍길동"
             "김철수 (학생)" → "김철수"
+            "손형록 사이버보안전공" → "손형록"
+            "김우진 컴퓨터공학전공" → "김우진"
         """
         # "/" 기준으로 분리
         if '/' in display_name:
@@ -74,6 +76,14 @@ class AssignmentParser:
         # "(" 기준으로 분리
         if '(' in display_name:
             return display_name.split('(')[0].strip()
+
+        # 공백 기준으로 분리 (첫 단어만 추출)
+        # "손형록 사이버보안전공" → "손형록"
+        # "홍길동" → "홍길동"
+        parts = display_name.strip().split()
+        if len(parts) > 1:
+            # 2단어 이상이면 첫 단어만 (이름으로 간주)
+            return parts[0]
 
         return display_name.strip()
 
