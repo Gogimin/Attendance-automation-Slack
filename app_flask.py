@@ -71,6 +71,34 @@ def index():
     return render_template('index.html')
 
 
+@app.route('/api/scheduler/status', methods=['GET'])
+def get_scheduler_status():
+    """스케줄러 상태 조회"""
+    try:
+        jobs = scheduler.get_jobs()
+        job_list = []
+
+        for job in jobs:
+            job_list.append({
+                'id': job.id,
+                'name': job.name,
+                'next_run_time': job.next_run_time.strftime('%Y-%m-%d %H:%M:%S') if job.next_run_time else None,
+                'trigger': str(job.trigger)
+            })
+
+        return jsonify({
+            'success': True,
+            'running': scheduler.running,
+            'jobs': job_list,
+            'total_jobs': len(job_list)
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
 # === 리팩토링 완료 ===
 # 모든 API route는 src/routes/ 폴더의 Blueprint로 이동되었습니다:
 # - attendance_routes.py: 출석 체크 관련 route
@@ -367,6 +395,17 @@ def check_attendance_job(workspace, schedule_item):
 
 def setup_scheduler():
     """스케줄러 설정"""
+    # 한글 요일 → APScheduler 요일 코드 변환
+    day_mapping = {
+        '월요일': 'mon',
+        '화요일': 'tue',
+        '수요일': 'wed',
+        '목요일': 'thu',
+        '금요일': 'fri',
+        '토요일': 'sat',
+        '일요일': 'sun'
+    }
+
     workspaces = workspace_manager.get_all_workspaces()
 
     for workspace in workspaces:
@@ -389,27 +428,52 @@ def setup_scheduler():
             check_time = schedule_item.get('check_attendance_time')
             check_column = schedule_item.get('check_attendance_column')
 
+            # 한글 요일을 영어로 변환
+            day_en = day_mapping.get(day, day)  # 매핑 실패 시 원본 사용
+
             # 출석 스레드 생성 스케줄
             if day and create_time:
-                hour, minute = create_time.split(':')
-                scheduler.add_job(
-                    func=lambda ws=workspace, sched_item=schedule_item: create_attendance_thread_job(ws, sched_item),
-                    trigger=CronTrigger(day_of_week=day, hour=int(hour), minute=int(minute)),
-                    id=f'create_thread_{workspace.name}_{day}_{idx}',
-                    replace_existing=True
-                )
-                print(f"  ✓ 출석 스레드 생성: 매주 {day} {create_time}")
+                try:
+                    hour, minute = create_time.split(':')
+                    job_id = f'create_thread_{workspace.name}_{day}_{idx}'
+                    scheduler.add_job(
+                        func=lambda ws=workspace, sched_item=schedule_item: create_attendance_thread_job(ws, sched_item),
+                        trigger=CronTrigger(day_of_week=day_en, hour=int(hour), minute=int(minute), timezone=KST),
+                        id=job_id,
+                        replace_existing=True
+                    )
+
+                    # 등록된 job 정보 가져오기
+                    try:
+                        job = scheduler.get_job(job_id)
+                        next_run = job.next_run_time.strftime('%Y-%m-%d %H:%M:%S') if job and job.next_run_time else 'Unknown'
+                        print(f"  ✓ 출석 스레드 생성: 매주 {day} {create_time} [{day_en}] (다음 실행: {next_run})")
+                    except:
+                        print(f"  ✓ 출석 스레드 생성: 매주 {day} {create_time} [{day_en}]")
+                except Exception as e:
+                    print(f"  ✗ 스케줄 등록 실패 (스레드 생성): {day} {create_time} - {e}")
 
             # 출석 집계 스케줄
             if day and check_time:
-                hour, minute = check_time.split(':')
-                scheduler.add_job(
-                    func=lambda ws=workspace, sched_item=schedule_item: check_attendance_job(ws, sched_item),
-                    trigger=CronTrigger(day_of_week=day, hour=int(hour), minute=int(minute)),
-                    id=f'check_attendance_{workspace.name}_{day}_{idx}',
-                    replace_existing=True
-                )
-                print(f"  ✓ 출석 집계: 매주 {day} {check_time} (열: {check_column})")
+                try:
+                    hour, minute = check_time.split(':')
+                    job_id = f'check_attendance_{workspace.name}_{day}_{idx}'
+                    scheduler.add_job(
+                        func=lambda ws=workspace, sched_item=schedule_item: check_attendance_job(ws, sched_item),
+                        trigger=CronTrigger(day_of_week=day_en, hour=int(hour), minute=int(minute), timezone=KST),
+                        id=job_id,
+                        replace_existing=True
+                    )
+
+                    # 등록된 job 정보 가져오기
+                    try:
+                        job = scheduler.get_job(job_id)
+                        next_run = job.next_run_time.strftime('%Y-%m-%d %H:%M:%S') if job and job.next_run_time else 'Unknown'
+                        print(f"  ✓ 출석 집계: 매주 {day} {check_time} (열: {check_column}) [{day_en}] (다음 실행: {next_run})")
+                    except:
+                        print(f"  ✓ 출석 집계: 매주 {day} {check_time} (열: {check_column}) [{day_en}]")
+                except Exception as e:
+                    print(f"  ✗ 스케줄 등록 실패 (출석 집계): {day} {check_time} - {e}")
 
 
 def restart_scheduler():
