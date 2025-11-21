@@ -61,8 +61,15 @@ app.register_blueprint(thread_bp)
 workspace_manager = WorkspaceManager()
 
 # 스케줄러 초기화 (한국 시간대)
-scheduler = BackgroundScheduler(timezone=pytz.timezone('Asia/Seoul'))
 KST = pytz.timezone('Asia/Seoul')
+scheduler = BackgroundScheduler(
+    timezone=KST,
+    job_defaults={
+        'coalesce': False,  # 놓친 작업을 한 번에 실행하지 않음
+        'max_instances': 1,  # 동시에 하나의 인스턴스만 실행
+        'misfire_grace_time': 300  # 5분 이내 놓친 작업은 실행
+    }
+)
 
 
 @app.route('/')
@@ -443,15 +450,9 @@ def setup_scheduler():
                         replace_existing=True
                     )
 
-                    # 등록된 job 정보 가져오기
-                    try:
-                        job = scheduler.get_job(job_id)
-                        next_run = job.next_run_time.strftime('%Y-%m-%d %H:%M:%S') if job and job.next_run_time else 'Unknown'
-                        print(f"  ✓ 출석 스레드 생성: 매주 {day} {create_time} [{day_en}] (다음 실행: {next_run})")
-                    except:
-                        print(f"  ✓ 출석 스레드 생성: 매주 {day} {create_time} [{day_en}]")
+                    print(f"  ✓ 출석 스레드 생성: 매주 {day} {create_time}")
                 except Exception as e:
-                    print(f"  ✗ 스케줄 등록 실패 (스레드 생성): {day} {create_time} - {e}")
+                    print(f"  ✗ 스케줄 등록 실패: {day} {create_time} - {e}")
 
             # 출석 집계 스케줄
             if day and check_time:
@@ -465,15 +466,15 @@ def setup_scheduler():
                         replace_existing=True
                     )
 
-                    # 등록된 job 정보 가져오기
-                    try:
-                        job = scheduler.get_job(job_id)
-                        next_run = job.next_run_time.strftime('%Y-%m-%d %H:%M:%S') if job and job.next_run_time else 'Unknown'
-                        print(f"  ✓ 출석 집계: 매주 {day} {check_time} (열: {check_column}) [{day_en}] (다음 실행: {next_run})")
-                    except:
-                        print(f"  ✓ 출석 집계: 매주 {day} {check_time} (열: {check_column}) [{day_en}]")
+                    print(f"  ✓ 출석 집계: 매주 {day} {check_time} (열: {check_column})")
                 except Exception as e:
-                    print(f"  ✗ 스케줄 등록 실패 (출석 집계): {day} {check_time} - {e}")
+                    print(f"  ✗ 스케줄 등록 실패: {day} {check_time} - {e}")
+
+
+def print_scheduler_status():
+    """스케줄러 상태 출력 (scheduler.start() 이후에 호출해야 함)"""
+    all_jobs = scheduler.get_jobs()
+    print(f"\n✓ 총 {len(all_jobs)}개의 스케줄이 등록되었습니다")
 
 
 def restart_scheduler():
@@ -547,6 +548,9 @@ if __name__ == '__main__':
         setup_scheduler()
         scheduler.start()
         print("\n✓ 스케줄러 시작 완료 (한국 시간대: Asia/Seoul)")
+
+        # 스케줄러 상태 출력 (start() 이후에 호출해야 next_run_time이 계산됨)
+        print_scheduler_status()
 
         print()
         print("=" * 50)
