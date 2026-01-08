@@ -6,6 +6,7 @@ import sys
 import webbrowser
 import threading
 from pathlib import Path
+from functools import partial
 from flask import Flask, render_template, jsonify, request
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -126,15 +127,30 @@ def create_attendance_thread_job(workspace, schedule_item):
     """출석 스레드 자동 생성 작업"""
     try:
         day = schedule_item.get('day', '')
-        print(f"\n[자동실행] 출석 스레드 생성 시작 - {workspace.display_name} ({day})")
+
+        # 요일 한글 표시
+        day_to_korean = {
+            'mon': '월요일', 'tue': '화요일', 'wed': '수요일', 'thu': '목요일',
+            'fri': '금요일', 'sat': '토요일', 'sun': '일요일'
+        }
+        day_korean = day_to_korean.get(day.lower() if day else '', day)
+
+        print(f"\n[자동실행] 출석 스레드 생성 시작 - {workspace.display_name} ({day_korean})")
         print(f"시간: {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"스케줄 정보: day={day}")
 
         schedule_config = workspace.auto_schedule
         if not schedule_config or not schedule_config.get('enabled'):
+            print(f"⚠️ 스케줄이 비활성화되어 있습니다. (enabled: {schedule_config.get('enabled') if schedule_config else 'None'})")
             return
+
+        print(f"✓ 스케줄 활성화 확인 완료")
 
         slack_handler = SlackHandler(workspace.slack_bot_token)
         message = schedule_config.get('create_thread_message', '@channel\n📢 출석 스레드입니다.\n\n"이름/출석했습니다" 형식으로 댓글 달아주세요!')
+
+        # 채널 참여 확인
+        slack_handler.join_channel(workspace.slack_channel_id)
 
         # 메시지 전송
         result = slack_handler.post_message(workspace.slack_channel_id, message)
@@ -165,12 +181,23 @@ def check_attendance_job(workspace, schedule_item):
         day = schedule_item.get('day', '')
         check_column = schedule_item.get('check_attendance_column', 'K')
 
-        print(f"\n[자동실행] 출석 집계 시작 - {workspace.display_name} ({day}, {check_column}열)")
+        # 요일 한글 표시
+        day_to_korean = {
+            'mon': '월요일', 'tue': '화요일', 'wed': '수요일', 'thu': '목요일',
+            'fri': '금요일', 'sat': '토요일', 'sun': '일요일'
+        }
+        day_korean = day_to_korean.get(day.lower() if day else '', day)
+
+        print(f"\n[자동실행] 출석 집계 시작 - {workspace.display_name} ({day_korean}, {check_column}열)")
         print(f"시간: {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"스케줄 정보: day={day}, column={check_column}")
 
         schedule_config = workspace.auto_schedule
         if not schedule_config or not schedule_config.get('enabled'):
+            print(f"⚠️ 스케줄이 비활성화되어 있습니다. (enabled: {schedule_config.get('enabled') if schedule_config else 'None'})")
             return
+
+        print(f"✓ 스케줄 활성화 확인 완료")
 
         # 1. 슬랙 연결
         slack_handler = SlackHandler(workspace.slack_bot_token)
@@ -402,15 +429,26 @@ def check_attendance_job(workspace, schedule_item):
 
 def setup_scheduler():
     """스케줄러 설정"""
-    # 한글 요일 → APScheduler 요일 코드 변환
+    # 요일 매핑 (한글 ↔ 영어, 양방향 지원)
     day_mapping = {
-        '월요일': 'mon',
-        '화요일': 'tue',
-        '수요일': 'wed',
-        '목요일': 'thu',
-        '금요일': 'fri',
-        '토요일': 'sat',
-        '일요일': 'sun'
+        '월요일': 'mon', 'mon': 'mon', 'monday': 'mon',
+        '화요일': 'tue', 'tue': 'tue', 'tuesday': 'tue',
+        '수요일': 'wed', 'wed': 'wed', 'wednesday': 'wed',
+        '목요일': 'thu', 'thu': 'thu', 'thursday': 'thu',
+        '금요일': 'fri', 'fri': 'fri', 'friday': 'fri',
+        '토요일': 'sat', 'sat': 'sat', 'saturday': 'sat',
+        '일요일': 'sun', 'sun': 'sun', 'sunday': 'sun'
+    }
+
+    # 영어 → 한글 변환용
+    day_to_korean = {
+        'mon': '월요일', 'monday': '월요일',
+        'tue': '화요일', 'tuesday': '화요일',
+        'wed': '수요일', 'wednesday': '수요일',
+        'thu': '목요일', 'thursday': '목요일',
+        'fri': '금요일', 'friday': '금요일',
+        'sat': '토요일', 'saturday': '토요일',
+        'sun': '일요일', 'sunday': '일요일'
     }
 
     workspaces = workspace_manager.get_all_workspaces()
@@ -435,40 +473,42 @@ def setup_scheduler():
             check_time = schedule_item.get('check_attendance_time')
             check_column = schedule_item.get('check_attendance_column')
 
-            # 한글 요일을 영어로 변환
-            day_en = day_mapping.get(day, day)  # 매핑 실패 시 원본 사용
+            # 요일을 영어 코드로 변환 (소문자)
+            day_lower = day.lower() if day else ''
+            day_en = day_mapping.get(day_lower, day_lower)  # 매핑 실패 시 원본 사용
+            day_korean = day_to_korean.get(day_lower, day)  # 한글 표시용
 
             # 출석 스레드 생성 스케줄
             if day and create_time:
                 try:
                     hour, minute = create_time.split(':')
-                    job_id = f'create_thread_{workspace.name}_{day}_{idx}'
+                    job_id = f'create_thread_{workspace.name}_{day_en}_{idx}'
                     scheduler.add_job(
-                        func=lambda ws=workspace, sched_item=schedule_item: create_attendance_thread_job(ws, sched_item),
+                        func=partial(create_attendance_thread_job, workspace, schedule_item),
                         trigger=CronTrigger(day_of_week=day_en, hour=int(hour), minute=int(minute), timezone=KST),
                         id=job_id,
                         replace_existing=True
                     )
 
-                    print(f"  ✓ 출석 스레드 생성: 매주 {day} {create_time}")
+                    print(f"  ✓ 출석 스레드 생성: 매주 {day_korean} {create_time} (job_id: {job_id})")
                 except Exception as e:
-                    print(f"  ✗ 스케줄 등록 실패: {day} {create_time} - {e}")
+                    print(f"  ✗ 스케줄 등록 실패: {day_korean} {create_time} - {e}")
 
             # 출석 집계 스케줄
             if day and check_time:
                 try:
                     hour, minute = check_time.split(':')
-                    job_id = f'check_attendance_{workspace.name}_{day}_{idx}'
+                    job_id = f'check_attendance_{workspace.name}_{day_en}_{idx}'
                     scheduler.add_job(
-                        func=lambda ws=workspace, sched_item=schedule_item: check_attendance_job(ws, sched_item),
+                        func=partial(check_attendance_job, workspace, schedule_item),
                         trigger=CronTrigger(day_of_week=day_en, hour=int(hour), minute=int(minute), timezone=KST),
                         id=job_id,
                         replace_existing=True
                     )
 
-                    print(f"  ✓ 출석 집계: 매주 {day} {check_time} (열: {check_column})")
+                    print(f"  ✓ 출석 집계: 매주 {day_korean} {check_time} (열: {check_column}, job_id: {job_id})")
                 except Exception as e:
-                    print(f"  ✗ 스케줄 등록 실패: {day} {check_time} - {e}")
+                    print(f"  ✗ 스케줄 등록 실패: {day_korean} {check_time} - {e}")
 
 
 def print_scheduler_status():

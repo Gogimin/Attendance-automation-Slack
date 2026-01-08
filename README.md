@@ -183,6 +183,7 @@ SLACK_CHECK/
 |-------|------|-----------|
 | `channels:history` | 채널 메시지 읽기 | ✅ 필수 |
 | `channels:read` | 채널 정보 읽기 | ✅ 필수 |
+| `channels:join` | 퍼블릭 채널 자동 참여 | ✅ 필수 |
 | `users:read` | 사용자 정보 읽기 | ✅ 필수 |
 | `users:read.email` | 이메일로 사용자 찾기 | ✅ 필수 |
 | `chat:write` | 메시지 작성 | ✅ 필수 |
@@ -192,7 +193,7 @@ SLACK_CHECK/
 1. **Install to Workspace** 버튼 클릭
 2. 권한 승인
 3. **Bot User OAuth Token** 복사 (xoxb-로 시작)
-4. 출석체크 채널에 봇 초대 (`@봇이름` 멘션)
+4. ~~출석체크 채널에 봇 초대 (`@봇이름` 멘션)~~ → `channels:join` 권한으로 자동 참여!
 
 ### 3. Google Sheets API 설정 📊
 

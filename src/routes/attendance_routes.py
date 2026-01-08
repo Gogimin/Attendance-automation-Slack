@@ -137,10 +137,25 @@ def run_attendance():
         }), 400
 
     # 6. 알림 전송
+    # notification_user_id를 우선 사용, 없으면 thread_user 사용
+    dm_recipient = None
+    if send_dm:
+        notification_user_id = workspace._config.get('notification_user_id', '')
+        if notification_user_id:
+            dm_recipient = notification_user_id
+            print(f"[INFO] notification_user_id 사용: {dm_recipient}")
+        elif thread_user:
+            # thread_user가 봇 ID가 아닌 경우만 사용
+            if not (thread_user.startswith('B') or thread_user.startswith('U0SLACKBOT')):
+                dm_recipient = thread_user
+                print(f"[INFO] thread_user 사용: {dm_recipient}")
+            else:
+                print(f"[INFO] thread_user가 봇이므로 DM 전송 안 함: {thread_user}")
+
     notifications = service.send_notifications(
         channel_id=workspace.slack_channel_id,
         thread_ts=thread_ts,
-        thread_user=thread_user,
+        thread_user=dm_recipient,
         matched_names=matched_names,
         absent_names=absent_names,
         total_students=len(matched_names) + len(absent_names),

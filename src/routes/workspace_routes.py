@@ -12,8 +12,10 @@ sys.path.insert(0, str(project_root))
 
 from src.workspace_manager import WorkspaceManager
 from src.slack_handler import SlackHandler
+from src.sheets_handler import SheetsHandler
 from src.utils.workspace_helper import validate_workspace_name, safe_path_join
 from src.utils.error_handler import safe_error_response
+from src.utils import column_index_to_letter
 
 workspace_bp = Blueprint('workspace', __name__)
 
@@ -121,6 +123,7 @@ def add_workspace():
     assignment_sheet_name = data.get('assignment_sheet_name', '실습과제현황').strip()
     name_column = data.get('name_column', 'B').strip()
     start_row = int(data.get('start_row', 4))
+    end_column = data.get('end_column', 'P').strip().upper()
     credentials_json = data['credentials_json']
 
     # 워크스페이스 폴더 경로
@@ -155,7 +158,7 @@ def add_workspace():
             "check_completion_message": "[자동] 출석 체크를 완료했습니다.\n출석: {present}명 / 미출석: {absent}명",
             "auto_column_enabled": False,
             "start_column": "H",
-            "end_column": "O"
+            "end_column": end_column
         }
     }
 
@@ -199,6 +202,11 @@ def edit_workspace(workspace_name):
             'error': '워크스페이스를 찾을 수 없습니다.'
         }), 404
 
+    # config.json 파일을 직접 읽기
+    config_file_path = workspace.config_file
+    with open(config_file_path, 'r', encoding='utf-8') as f:
+        config = json.load(f)
+
     # 수정 가능한 필드들
     display_name = data.get('display_name', '').strip()
     slack_channel_id = data.get('slack_channel_id', '').strip()
@@ -207,39 +215,72 @@ def edit_workspace(workspace_name):
     assignment_sheet_name = data.get('assignment_sheet_name', '').strip()
     name_column = data.get('name_column', '').strip()
     start_row = data.get('start_row')
+    end_column = data.get('end_column', '').strip().upper()
     notification_user_id = data.get('notification_user_id', '').strip()
 
-    # config.json 업데이트
+    # config 업데이트
     if display_name:
-        workspace._config['name'] = display_name
+        config['name'] = display_name
 
     if slack_channel_id:
-        workspace._config['slack_channel_id'] = slack_channel_id
+        config['slack_channel_id'] = slack_channel_id
 
     if assignment_channel_id:
-        workspace._config['assignment_channel_id'] = assignment_channel_id
+        config['assignment_channel_id'] = assignment_channel_id
     else:
         # 비어있으면 출석 채널과 동일하게 설정
-        workspace._config['assignment_channel_id'] = workspace._config['slack_channel_id']
+        config['assignment_channel_id'] = config.get('slack_channel_id', '')
 
     if sheet_name:
-        workspace._config['sheet_name'] = sheet_name
+        config['sheet_name'] = sheet_name
 
     if assignment_sheet_name:
-        workspace._config['assignment_sheet_name'] = assignment_sheet_name
+        config['assignment_sheet_name'] = assignment_sheet_name
 
     if name_column:
-        workspace._config['name_column'] = name_column
+        config['name_column'] = name_column
 
     if start_row is not None:
-        workspace._config['start_row'] = int(start_row)
+        config['start_row'] = int(start_row)
+
+    # end_column 업데이트 (auto_schedule에 저장, 기존 필드 보존)
+    if end_column:
+        if 'auto_schedule' not in config:
+            config['auto_schedule'] = {
+                "enabled": False,
+                "schedules": [],
+                "create_thread_message": "@channel\n📢 출석 스레드입니다.\n\n\"이름/출석했습니다\" 형식으로 댓글 달아주세요!",
+                "check_completion_message": "[자동] 출석 체크를 완료했습니다.\n출석: {present}명 / 미출석: {absent}명",
+                "auto_column_enabled": False,
+                "start_column": "H",
+                "end_column": "P"
+            }
+        # 기존 auto_schedule 필드를 유지하면서 업데이트
+        config['auto_schedule']['start_column'] = 'H'
+        config['auto_schedule']['end_column'] = end_column
 
     # notification_user_id는 빈 값도 허용
-    workspace._config['notification_user_id'] = notification_user_id
+    config['notification_user_id'] = notification_user_id
 
     # 파일 저장
-    with open(workspace.config_file, 'w', encoding='utf-8') as f:
-        json.dump(workspace._config, f, ensure_ascii=False, indent=2)
+    print(f"[DEBUG] 저장할 config: {config}")
+    print(f"[DEBUG] 파일 경로: {config_file_path}")
+
+    try:
+        with open(config_file_path, 'w', encoding='utf-8') as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+        print(f"[DEBUG] 파일 저장 완료")
+    except Exception as e:
+        print(f"[ERROR] 파일 저장 실패: {e}")
+        return jsonify({
+            'success': False,
+            'error': f'파일 저장 실패: {str(e)}'
+        }), 500
+
+    # 저장 확인
+    with open(config_file_path, 'r', encoding='utf-8') as f:
+        saved_config = json.load(f)
+    print(f"[DEBUG] 저장 후 읽은 config: {saved_config}")
 
     # 워크스페이스 매니저 리로드
     workspace_manager.reload()
@@ -247,7 +288,7 @@ def edit_workspace(workspace_name):
     return jsonify({
         'success': True,
         'message': '워크스페이스 정보가 업데이트되었습니다.',
-        'updated_config': workspace._config
+        'updated_config': config
     })
 
 
@@ -262,6 +303,10 @@ def get_workspace_info(workspace_name):
             'error': '워크스페이스를 찾을 수 없습니다.'
         }), 404
 
+    # auto_schedule에서 end_column 가져오기
+    auto_schedule = workspace._config.get('auto_schedule', {})
+    end_column = auto_schedule.get('end_column', 'P')
+
     return jsonify({
         'success': True,
         'workspace': {
@@ -274,6 +319,7 @@ def get_workspace_info(workspace_name):
             'assignment_sheet_name': workspace._config.get('assignment_sheet_name', '실습과제현황'),
             'name_column': workspace._config.get('name_column'),
             'start_row': workspace.start_row,
+            'end_column': end_column,
             'notification_user_id': workspace._config.get('notification_user_id', '')
         }
     })
@@ -368,3 +414,146 @@ def save_duplicate_names(workspace_name):
         'message': '동명이인 정보가 저장되었습니다.',
         'converted_data': duplicate_names_with_user_id
     })
+
+
+@workspace_bp.route('/api/workspaces/<workspace_name>/sheet-columns', methods=['GET'])
+@safe_error_response
+def get_sheet_columns(workspace_name):
+    """워크스페이스의 구글 시트 열 정보 가져오기 (출석 체크용 열만)"""
+    workspace = workspace_manager.get_workspace(workspace_name)
+    if not workspace:
+        return jsonify({
+            'success': False,
+            'error': '워크스페이스를 찾을 수 없습니다.'
+        }), 404
+
+    try:
+        # SheetsHandler 초기화
+        sheets_handler = SheetsHandler(
+            workspace.credentials_file,
+            workspace.spreadsheet_id
+        )
+
+        # auto_schedule 설정에서 start_column, end_column 가져오기
+        auto_schedule = workspace.auto_schedule or {}
+        start_column = auto_schedule.get('start_column', 'H')
+        end_column = auto_schedule.get('end_column', 'Z')
+
+        # start_row 행의 헤더 읽기 (보통 start_row에 헤더가 있음)
+        sheet_name = workspace.sheet_name
+        header_row = workspace.start_row  # 예: 4행
+        header_range = f"{sheet_name}!A{header_row}:Z{header_row}"
+        header_values = sheets_handler.read_range(header_range)
+
+        # 열 문자를 인덱스로 변환하는 함수
+        def column_letter_to_index(letter):
+            """A=0, B=1, ..., Z=25, AA=26, ..."""
+            letter = letter.upper()
+            result = 0
+            for char in letter:
+                result = result * 26 + (ord(char) - ord('A') + 1)
+            return result - 1
+
+        start_idx = column_letter_to_index(start_column)
+        end_idx = column_letter_to_index(end_column)
+
+        # 열 정보 생성 (start_column부터 end_column까지만)
+        columns = []
+        if header_values and len(header_values) > 0:
+            row = header_values[0]
+            for idx in range(start_idx, min(end_idx + 1, len(row))):
+                cell_value = row[idx] if idx < len(row) else ""
+
+                # 빈 셀은 제외
+                if not cell_value or not cell_value.strip():
+                    continue
+
+                column_letter = column_index_to_letter(idx)
+                columns.append({
+                    'letter': column_letter,
+                    'name': cell_value.strip(),
+                    'index': idx
+                })
+
+        # 헤더가 없는 경우 start_column부터 end_column까지 기본 열 생성
+        if not columns:
+            for idx in range(start_idx, end_idx + 1):
+                column_letter = column_index_to_letter(idx)
+                columns.append({
+                    'letter': column_letter,
+                    'name': f"열 {column_letter}",
+                    'index': idx
+                })
+
+        return jsonify({
+            'success': True,
+            'columns': columns
+        })
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'시트 정보를 가져올 수 없습니다: {str(e)}'
+        }), 500
+
+
+@workspace_bp.route('/api/workspaces/<workspace_name>/assignment-sheet-columns', methods=['GET'])
+@safe_error_response
+def get_assignment_sheet_columns(workspace_name):
+    """워크스페이스의 과제 시트 열 정보 가져오기"""
+    workspace = workspace_manager.get_workspace(workspace_name)
+    if not workspace:
+        return jsonify({
+            'success': False,
+            'error': '워크스페이스를 찾을 수 없습니다.'
+        }), 404
+
+    try:
+        # SheetsHandler 초기화
+        sheets_handler = SheetsHandler(
+            workspace.credentials_file,
+            workspace.spreadsheet_id
+        )
+
+        # 과제 시트 정보 가져오기
+        sheet_name = workspace.assignment_sheet_name
+        header_row = workspace.assignment_start_row  # 과제 시트의 시작 행
+        header_range = f"{sheet_name}!A{header_row}:Z{header_row}"
+        header_values = sheets_handler.read_range(header_range)
+
+        # 열 정보 생성 (모든 열)
+        columns = []
+        if header_values and len(header_values) > 0:
+            row = header_values[0]
+            for idx, cell_value in enumerate(row):
+                # 빈 셀은 제외
+                if not cell_value or not cell_value.strip():
+                    continue
+
+                column_letter = column_index_to_letter(idx)
+                columns.append({
+                    'letter': column_letter,
+                    'name': cell_value.strip(),
+                    'index': idx
+                })
+
+        # 헤더가 없는 경우 기본 26개 열 생성
+        if not columns:
+            for idx in range(26):
+                column_letter = column_index_to_letter(idx)
+                columns.append({
+                    'letter': column_letter,
+                    'name': f"열 {column_letter}",
+                    'index': idx
+                })
+
+        return jsonify({
+            'success': True,
+            'columns': columns
+        })
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'과제 시트 정보를 가져올 수 없습니다: {str(e)}'
+        }), 500

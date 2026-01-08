@@ -339,6 +339,38 @@ class SheetsHandler:
             print(f"✗ 오류 발생: {e}")
             return False
 
+    def read_range(self, range_name: str) -> List[List[str]]:
+        """
+        지정된 범위의 값을 읽어오기
+
+        Args:
+            range_name (str): A1 notation 범위 (예: "Sheet1!A1:Z1")
+
+        Returns:
+            List[List[str]]: 셀 값들의 2차원 리스트
+        """
+        if not self.service:
+            if not self.connect():
+                return []
+
+        try:
+            result = self.service.spreadsheets().values().get(
+                spreadsheetId=self.spreadsheet_id,
+                range=range_name
+            ).execute()
+
+            values = result.get('values', [])
+            return values
+
+        except HttpError as e:
+            print(f"✗ 범위 읽기 실패 ({range_name})")
+            print(f"   에러 코드: {e.resp.status}")
+            print(f"   상세: {e.error_details if hasattr(e, 'error_details') else str(e)}")
+            return []
+        except Exception as e:
+            print(f"✗ 범위 읽기 오류: {e}")
+            return []
+
     def batch_update_assignment(self, sheet_name: str, column: int, students: Dict[str, int],
                                 submitted: List[str], mark_absent: bool = True) -> int:
         """

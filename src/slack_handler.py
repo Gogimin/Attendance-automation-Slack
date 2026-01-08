@@ -96,7 +96,16 @@ class SlackHandler:
             return replies
 
         except SlackApiError as e:
-            print(f"✗ 댓글 가져오기 실패: {e.response['error']}")
+            error_msg = e.response.get('error', 'unknown')
+            error_detail = e.response.get('needed', '')
+            print(f"✗ 댓글 가져오기 실패: {error_msg}")
+            if error_detail:
+                print(f"  필요한 권한: {error_detail}")
+            if error_msg == 'thread_not_found':
+                print(f"  → Thread TS가 해당 채널에 존재하지 않습니다.")
+                print(f"  → Bot이 채널에 초대되어 있는지 확인하세요.")
+                print(f"  → 스레드가 삭제되었거나 URL이 댓글 URL일 수 있습니다.")
+            print(f"  전체 응답: {e.response}")
             return []
 
     def get_user_info(self, user_id: str) -> Optional[Dict]:
@@ -295,8 +304,15 @@ class SlackHandler:
                 print(f"[DM] 이메일 주소 감지: {user_id_or_email}")
                 user_id = self.get_user_id_by_email(user_id_or_email)
                 if not user_id:
-                    print(f"✗ DM 전송 실패: 이메일로 사용자를 찾을 수 없습니다")
+                    print(f"✗ DM 전송 실패: 이메일로 사용자를 찾을 수 없습니다 ({user_id_or_email})")
                     return False
+
+            # 봇 자신인지 확인
+            if user_id.startswith('B'):
+                print(f"✗ DM 전송 실패: 봇에게는 DM을 보낼 수 없습니다 (User ID: {user_id})")
+                return False
+
+            print(f"[DM] User ID로 DM 전송 시도: {user_id}")
 
             # DM 채널 열기
             response = self.client.conversations_open(users=[user_id])
@@ -390,6 +406,54 @@ class SlackHandler:
         except SlackApiError as e:
             print(f"✗ 메시지 전송 실패: {e.response['error']}")
             return None
+
+    def join_channel(self, channel_id: str) -> bool:
+        """
+        퍼블릭 채널에 자동으로 참여
+
+        Args:
+            channel_id (str): 채널 ID
+
+        Returns:
+            bool: 참여 성공 여부
+        """
+        try:
+            response = self.client.conversations_join(channel=channel_id)
+
+            if response['ok']:
+                print(f"✓ 채널 참여 성공: {channel_id}")
+                return True
+            else:
+                print(f"✗ 채널 참여 실패")
+                return False
+
+        except SlackApiError as e:
+            error = e.response.get('error', 'unknown')
+
+            # 이미 채널에 있는 경우
+            if error == 'already_in_channel':
+                print(f"✓ 이미 채널에 참여 중: {channel_id}")
+                return True
+
+            # 프라이빗 채널이거나 존재하지 않는 경우
+            elif error == 'channel_not_found':
+                print(f"✗ 채널 참여 실패: 프라이빗 채널이거나 존재하지 않는 채널입니다")
+                print(f"  → 프라이빗 채널은 수동으로 봇을 초대해야 합니다")
+                return False
+
+            # 아카이브된 채널
+            elif error == 'is_archived':
+                print(f"✗ 채널 참여 실패: 아카이브된 채널입니다")
+                return False
+
+            # 권한 부족
+            elif error == 'missing_scope':
+                print(f"✗ 채널 참여 실패: 'channels:join' 권한이 필요합니다")
+                print(f"  → Slack App 설정에서 'channels:join' scope를 추가하세요")
+                return False
+
+            print(f"✗ 채널 참여 실패: {error}")
+            return False
 
 
 # 테스트 코드

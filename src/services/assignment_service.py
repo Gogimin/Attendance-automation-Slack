@@ -65,6 +65,10 @@ class AssignmentService:
         Raises:
             ValueError: 댓글 수집 실패, 학생 명단 읽기 실패 등
         """
+        # 0. 채널에 자동 참여 시도
+        print(f"\n[과제체크] 채널 참여 확인 중...")
+        self.slack.join_channel(assignment_channel_id)
+
         # 1. 슬랙 댓글 수집
         replies = self.slack.get_replies_with_user_info(
             assignment_channel_id,

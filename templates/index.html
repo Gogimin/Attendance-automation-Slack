@@ -32,9 +32,6 @@
             <button class="tab" data-tab="assignment">
                 <span>📝 과제체크</span>
             </button>
-            <button class="tab" data-tab="info">
-                <span>📊 정보조회</span>
-            </button>
         </div>
 
         <!-- 페이지 1: 출석체크 -->
@@ -135,6 +132,12 @@
                         </div>
 
                         <div class="form-group">
+                            <label for="new-end-column">출석 체크 끝 열</label>
+                            <input type="text" id="new-end-column" class="form-control small" value="P" maxlength="2">
+                            <small>출석 체크가 가능한 마지막 열 (시작은 H열 고정, 예: P, Z)</small>
+                        </div>
+
+                        <div class="form-group">
                             <label for="new-credentials">Google Credentials JSON *</label>
                             <div style="display: flex; gap: 10px; margin-bottom: 8px;">
                                 <button type="button" id="load-credentials-btn" class="btn btn-secondary" style="flex: 0 0 auto;">📂 파일 불러오기</button>
@@ -202,9 +205,15 @@
 
                 <div class="form-group">
                     <label for="column-input">출석체크할 열</label>
-                    <input type="text" id="column-input" class="form-control small"
-                           value="H" maxlength="2" placeholder="H">
-                    <small>구글 시트에서 출석을 표시할 열 (예: H, K, L)</small>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <select id="column-select" class="form-control" style="flex: 2;">
+                            <option value="">워크스페이스를 먼저 선택하세요...</option>
+                        </select>
+                        <span style="color: #888;">또는</span>
+                        <input type="text" id="column-input" class="form-control small" style="flex: 1;"
+                               value="H" maxlength="2" placeholder="H">
+                    </div>
+                    <small>구글 시트 열을 선택하거나 직접 입력 (예: H, K, L)</small>
                 </div>
 
                 <div class="checkbox-group">
@@ -359,19 +368,19 @@
                         <div id="edit-auto-column-settings" style="display: none; margin-top: 15px;">
                             <div class="form-row">
                                 <div class="form-group">
-                                    <label for="edit-start-column">시작 열</label>
-                                    <input type="text" id="edit-start-column" class="form-control small" maxlength="2">
+                                    <label for="edit-schedule-start-column">시작 열</label>
+                                    <input type="text" id="edit-schedule-start-column" class="form-control small" maxlength="2">
                                 </div>
                                 <div class="form-group">
-                                    <label for="edit-end-column">끝 열</label>
-                                    <input type="text" id="edit-end-column" class="form-control small" maxlength="2">
+                                    <label for="edit-schedule-end-column">끝 열</label>
+                                    <input type="text" id="edit-schedule-end-column" class="form-control small" maxlength="2">
                                 </div>
                             </div>
                         </div>
 
                         <div class="form-group">
-                            <label for="edit-notification-user-id">알림 수신자</label>
-                            <input type="text" id="edit-notification-user-id" class="form-control">
+                            <label for="edit-schedule-notification-user-id">알림 수신자</label>
+                            <input type="text" id="edit-schedule-notification-user-id" class="form-control">
                         </div>
 
                         <h3 style="margin-top: 20px;">📅 요일별 스케줄</h3>
@@ -474,6 +483,12 @@
                         </div>
 
                         <div class="form-group">
+                            <label for="edit-end-column">출석 체크 끝 열</label>
+                            <input type="text" id="edit-end-column" class="form-control small" maxlength="2" placeholder="P">
+                            <small>출석 체크가 가능한 마지막 열 (시작은 H열 고정, 예: P, Z)</small>
+                        </div>
+
+                        <div class="form-group">
                             <label for="edit-notification-user-id">알림 수신자</label>
                             <input type="text" id="edit-notification-user-id" class="form-control" placeholder="이메일 또는 User ID">
                             <small>자동 실행 알림을 받을 사용자 (선택사항)</small>
@@ -511,7 +526,12 @@
 
             <!-- 결과 -->
             <section id="result-section" class="card" style="display: none;">
-                <h2>🎉 출석체크 완료</h2>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h2 style="margin: 0;">🎉 출석체크 완료</h2>
+                    <button id="copy-result-btn" class="btn btn-secondary" onclick="copyAttendanceResult()">
+                        📋 결과 복사
+                    </button>
+                </div>
 
                 <div class="stats-grid">
                     <div class="stat-card">
@@ -585,9 +605,15 @@
 
                 <div class="form-group">
                     <label for="assignment-column">기록할 열</label>
-                    <input type="text" id="assignment-column" class="form-control small"
-                           value="D" maxlength="2" placeholder="D">
-                    <small>"실습과제현황" 시트의 어느 열에 기록할지 (예: D=10_25과제, E=10_27과제)</small>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <select id="assignment-column-select" class="form-control" style="flex: 2;">
+                            <option value="">워크스페이스를 먼저 선택하세요...</option>
+                        </select>
+                        <span style="color: #888;">또는</span>
+                        <input type="text" id="assignment-column" class="form-control small" style="flex: 1;"
+                               value="D" maxlength="2" placeholder="D">
+                    </div>
+                    <small>"실습과제현황" 시트의 열을 선택하거나 직접 입력 (예: D=10_25과제, E=10_27과제)</small>
                 </div>
 
                 <div class="checkbox-group">
@@ -644,33 +670,6 @@
                 <h2>📜 최근 체크 기록 (최근 5개)</h2>
                 <div id="recent-assignment-history">
                     <p class="info-text">아직 과제 체크 기록이 없습니다.</p>
-                </div>
-            </section>
-        </div>
-
-        <!-- 페이지 3: 정보조회 -->
-        <div id="info-tab" class="tab-content" style="display:none;">
-            <!-- 워크스페이스 선택 -->
-            <section class="card">
-                <h2>워크스페이스 선택</h2>
-                <select id="info-workspace-select" class="form-control">
-                    <option value="">워크스페이스를 선택하세요...</option>
-                </select>
-            </section>
-
-            <!-- 자동 실행 스케줄 -->
-            <section class="card" id="schedule-info" style="display:none;">
-                <h2>📅 자동 실행 스케줄</h2>
-                <div id="schedule-details">
-                    <!-- JavaScript로 동적 생성 -->
-                </div>
-            </section>
-
-            <!-- 과제 체크 기록 -->
-            <section class="card" id="assignment-history-section" style="display:none;">
-                <h2>📜 과제 체크 기록</h2>
-                <div id="assignment-history-list">
-                    <!-- JavaScript로 동적 생성 -->
                 </div>
             </section>
         </div>

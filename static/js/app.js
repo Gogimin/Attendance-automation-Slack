@@ -8,7 +8,106 @@ document.addEventListener('DOMContentLoaded', function() {
     loadWorkspaces();
     setupEventListeners();
     loadAllSchedules(); // 예약 현황 로드
+    initializeToastContainer(); // Toast 컨테이너 초기화
+    initializeEscapeKeyHandler(); // ESC 키 핸들러 초기화
 });
+
+// ========================================
+// Toast 알림 시스템
+// ========================================
+
+function initializeToastContainer() {
+    if (!document.getElementById('toast-container')) {
+        const container = document.createElement('div');
+        container.id = 'toast-container';
+        container.className = 'toast-container';
+        document.body.appendChild(container);
+    }
+}
+
+function showToast(message, type = 'info', duration = 5000) {
+    const container = document.getElementById('toast-container');
+    if (!container) {
+        initializeToastContainer();
+        return showToast(message, type, duration);
+    }
+
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+
+    const icons = {
+        success: '✅',
+        error: '❌',
+        warning: '⚠️',
+        info: 'ℹ️'
+    };
+
+    const titles = {
+        success: '성공',
+        error: '오류',
+        warning: '경고',
+        info: '알림'
+    };
+
+    toast.innerHTML = `
+        <div class="toast-icon">${icons[type] || icons.info}</div>
+        <div class="toast-content">
+            <div class="toast-title">${titles[type] || titles.info}</div>
+            <div class="toast-message">${message}</div>
+        </div>
+        <button class="toast-close" onclick="closeToast(this)">×</button>
+    `;
+
+    container.appendChild(toast);
+
+    // 자동 제거
+    if (duration > 0) {
+        setTimeout(() => {
+            closeToast(toast.querySelector('.toast-close'));
+        }, duration);
+    }
+}
+
+function closeToast(closeBtn) {
+    const toast = closeBtn.closest('.toast');
+    if (toast) {
+        toast.classList.add('removing');
+        setTimeout(() => {
+            toast.remove();
+        }, 300);
+    }
+}
+
+// ========================================
+// ESC 키로 모달 닫기
+// ========================================
+
+function initializeEscapeKeyHandler() {
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' || e.keyCode === 27) {
+            // 열려있는 모든 모달 찾기
+            const openModals = document.querySelectorAll('.modal[style*="display: flex"]');
+            if (openModals.length > 0) {
+                // 가장 최근에 열린 모달 (마지막 모달) 닫기
+                const lastModal = openModals[openModals.length - 1];
+
+                // 모달 ID에 따라 적절한 닫기 함수 호출
+                if (lastModal.id === 'add-workspace-modal') {
+                    closeAddWorkspaceModal();
+                } else if (lastModal.id === 'edit-workspace-modal') {
+                    closeEditWorkspaceModal();
+                } else if (lastModal.id === 'duplicate-names-modal') {
+                    closeDuplicateNamesModal();
+                } else if (lastModal.id === 'edit-schedule-modal') {
+                    closeEditScheduleModal();
+                } else {
+                    // 기본 닫기 동작
+                    lastModal.style.display = 'none';
+                }
+            }
+        }
+    });
+}
 
 // 이벤트 리스너 설정
 function setupEventListeners() {
@@ -17,6 +116,22 @@ function setupEventListeners() {
 
     // 워크스페이스 추가 버튼
     document.getElementById('add-workspace-btn').addEventListener('click', openAddWorkspaceModal);
+
+    // 출석체크 열 드롭다운 선택 이벤트
+    document.getElementById('column-select').addEventListener('change', function(e) {
+        const selectedValue = e.target.value;
+        if (selectedValue) {
+            document.getElementById('column-input').value = selectedValue;
+        }
+    });
+
+    // 과제체크 열 드롭다운 선택 이벤트
+    document.getElementById('assignment-column-select').addEventListener('change', function(e) {
+        const selectedValue = e.target.value;
+        if (selectedValue) {
+            document.getElementById('assignment-column').value = selectedValue;
+        }
+    });
 
     // 워크스페이스 삭제 버튼
     document.getElementById('delete-workspace-btn').addEventListener('click', deleteWorkspace);
@@ -159,13 +274,19 @@ function onWorkspaceChange(e) {
         // 스레드 정보 초기화
         resetThreadInfo();
 
-        // 스케줄 폼 초기화 (기존 값 불러오지 않음)
-        resetScheduleForm();
+        // 기존 스케줄 불러오기 (사용자가 볼 수 있도록)
+        loadSchedule();
+
+        // 시트 열 정보 로드
+        loadSheetColumns(currentWorkspace);
     } else {
         currentWorkspace = null;
         document.getElementById('workspace-info').style.display = 'none';
         document.getElementById('delete-workspace-btn').style.display = 'none';
         document.getElementById('workspace-actions').style.display = 'none';
+
+        // 열 드롭다운 초기화
+        resetColumnDropdowns();
     }
 }
 
@@ -346,24 +467,34 @@ function showResult(result) {
 
     // 출석자 명단
     const presentList = document.getElementById('present-list');
-    presentList.innerHTML = result.matched_names.join(', ');
+    if (result.matched_names.length > 0) {
+        presentList.innerHTML = result.matched_names
+            .map(name => `<span class="name-tag">${name}</span>`)
+            .join('');
+    } else {
+        presentList.innerHTML = '<em style="color: #888;">출석자가 없습니다</em>';
+    }
 
     // 미출석자 명단
     const absentList = document.getElementById('absent-list');
     if (result.absent_names.length > 0) {
-        absentList.innerHTML = result.absent_names.join(', ');
+        absentList.innerHTML = result.absent_names
+            .map(name => `<span class="name-tag">${name}</span>`)
+            .join('');
         if (result.absent > result.absent_names.length) {
-            absentList.innerHTML += ` ... 외 ${result.absent - result.absent_names.length}명`;
+            absentList.innerHTML += `<span class="name-tag" style="opacity: 0.7;">... 외 ${result.absent - result.absent_names.length}명</span>`;
         }
     } else {
-        absentList.innerHTML = '<em>전원 출석!</em>';
+        absentList.innerHTML = '<em style="color: var(--color-success); font-weight: 600;">🎉 전원 출석!</em>';
     }
 
     // 명단에 없는 이름
     if (result.unmatched_names && result.unmatched_names.length > 0) {
         const unmatchedSection = document.getElementById('unmatched-section');
         const unmatchedList = document.getElementById('unmatched-list');
-        unmatchedList.innerHTML = result.unmatched_names.join(', ');
+        unmatchedList.innerHTML = result.unmatched_names
+            .map(name => `<span class="name-tag" style="background: var(--color-warning);">${name}</span>`)
+            .join('');
         unmatchedSection.style.display = 'block';
     } else {
         document.getElementById('unmatched-section').style.display = 'none';
@@ -538,7 +669,7 @@ async function loadSchedule() {
 // 스케줄 저장
 async function saveSchedule() {
     if (!currentWorkspace) {
-        alert('⚠️ 워크스페이스를 먼저 선택하세요.');
+        showToast('워크스페이스를 먼저 선택하세요.', 'warning');
         return;
     }
 
@@ -597,13 +728,13 @@ async function saveSchedule() {
         const data = await response.json();
 
         if (data.success) {
-            alert('✅ 스케줄이 저장되었습니다!');
+            showToast('스케줄이 저장되었습니다!', 'success');
             loadAllSchedules();
         } else {
-            alert('❌ 스케줄 저장 실패:\n\n' + data.error);
+            showToast('스케줄 저장 실패: ' + data.error, 'error', 7000);
         }
     } catch (error) {
-        alert('❌ 스케줄 저장 오류:\n\n' + error.message);
+        showToast('스케줄 저장 오류: ' + error.message, 'error', 7000);
     } finally {
         btn.disabled = false;
         btn.innerHTML = originalText;
@@ -803,16 +934,16 @@ function loadTokenFile(event) {
 
             // 입력 필드에 삽입
             document.getElementById('new-bot-token').value = content;
-            alert('✅ Bot Token을 성공적으로 불러왔습니다!');
+            showToast('Bot Token을 성공적으로 불러왔습니다!', 'success');
         } catch (error) {
-            alert('❌ 파일을 읽는 중 오류가 발생했습니다.\n\n' + error.message);
+            showToast('파일을 읽는 중 오류가 발생했습니다: ' + error.message, 'error', 7000);
         }
         // 파일 입력 초기화
         event.target.value = '';
     };
 
     reader.onerror = function() {
-        alert('❌ 파일을 읽는 중 오류가 발생했습니다.');
+        showToast('파일을 읽는 중 오류가 발생했습니다.', 'error');
         event.target.value = '';
     };
 
@@ -857,7 +988,7 @@ async function deleteWorkspace() {
         const data = await response.json();
 
         if (data.success) {
-            alert('✅ 워크스페이스가 삭제되었습니다.\n\n삭제된 워크스페이스: ' + displayName);
+            showToast('워크스페이스가 삭제되었습니다: ' + displayName, 'success');
 
             // 현재 선택 초기화
             currentWorkspace = null;
@@ -873,10 +1004,10 @@ async function deleteWorkspace() {
             hideError();
             hideResult();
         } else {
-            alert('❌ 워크스페이스 삭제 실패:\n\n' + data.error);
+            showToast('워크스페이스 삭제 실패: ' + data.error, 'error', 7000);
         }
     } catch (error) {
-        alert('❌ 워크스페이스 삭제 오류:\n\n' + error.message);
+        showToast('워크스페이스 삭제 오류: ' + error.message, 'error', 7000);
     } finally {
         btn.disabled = false;
         btn.innerHTML = originalText;
@@ -890,7 +1021,7 @@ function loadCredentialsFile(event) {
 
     // 파일 확장자 검증
     if (!file.name.endsWith('.json')) {
-        alert('JSON 파일만 업로드할 수 있습니다.');
+        showToast('JSON 파일만 업로드할 수 있습니다.', 'warning');
         event.target.value = '';
         return;
     }
@@ -904,16 +1035,16 @@ function loadCredentialsFile(event) {
             JSON.parse(content);
             // 유효하면 textarea에 삽입
             document.getElementById('new-credentials').value = content;
-            alert('✅ 파일을 성공적으로 불러왔습니다!');
+            showToast('파일을 성공적으로 불러왔습니다!', 'success');
         } catch (error) {
-            alert('❌ JSON 파일 형식이 올바르지 않습니다.\n\n' + error.message);
+            showToast('JSON 파일 형식이 올바르지 않습니다: ' + error.message, 'error', 7000);
         }
         // 파일 입력 초기화 (같은 파일 재선택 가능하도록)
         event.target.value = '';
     };
 
     reader.onerror = function() {
-        alert('❌ 파일을 읽는 중 오류가 발생했습니다.');
+        showToast('파일을 읽는 중 오류가 발생했습니다.', 'error');
         event.target.value = '';
     };
 
@@ -925,6 +1056,7 @@ function openAddWorkspaceModal() {
     const modal = document.getElementById('add-workspace-modal');
     modal.style.display = 'flex';
     clearAddWorkspaceForm();
+    setupModalFocusTrap(modal);
 }
 
 // 모달 닫기
@@ -962,48 +1094,49 @@ async function submitAddWorkspace() {
     const assignmentSheetName = document.getElementById('new-assignment-sheet-name').value.trim();
     const nameColumn = document.getElementById('new-name-column').value.trim();
     const startRow = parseInt(document.getElementById('new-start-row').value);
+    const endColumn = document.getElementById('new-end-column').value.trim().toUpperCase();
     const credentialsText = document.getElementById('new-credentials').value.trim();
 
     // 유효성 검사
     if (!workspaceName) {
-        alert('워크스페이스 폴더 이름을 입력하세요.');
+        showToast('워크스페이스 폴더 이름을 입력하세요.', 'warning');
         return;
     }
 
     // 폴더 이름 검증 (Windows 폴더명으로 사용할 수 없는 특수문자만 제외)
     const invalidChars = /[<>:"/\\|?*]/;
     if (invalidChars.test(workspaceName)) {
-        alert('워크스페이스 폴더 이름에 다음 문자는 사용할 수 없습니다:\n< > : " / \\ | ? *');
+        showToast('워크스페이스 폴더 이름에 다음 문자는 사용할 수 없습니다: < > : " / \\ | ? *', 'warning', 7000);
         return;
     }
 
     if (workspaceName.trim().length === 0) {
-        alert('워크스페이스 폴더 이름을 입력하세요.');
+        showToast('워크스페이스 폴더 이름을 입력하세요.', 'warning');
         return;
     }
 
     if (!displayName) {
-        alert('표시 이름을 입력하세요.');
+        showToast('표시 이름을 입력하세요.', 'warning');
         return;
     }
 
     if (!botToken || !botToken.startsWith('xoxb-')) {
-        alert('올바른 Slack Bot Token을 입력하세요. (xoxb-로 시작해야 합니다)');
+        showToast('올바른 Slack Bot Token을 입력하세요. (xoxb-로 시작해야 합니다)', 'warning', 6000);
         return;
     }
 
     if (!channelId || !channelId.startsWith('C')) {
-        alert('올바른 Channel ID를 입력하세요. (C로 시작해야 합니다)');
+        showToast('올바른 Channel ID를 입력하세요. (C로 시작해야 합니다)', 'warning', 6000);
         return;
     }
 
     if (!spreadsheetId) {
-        alert('Spreadsheet ID를 입력하세요.');
+        showToast('Spreadsheet ID를 입력하세요.', 'warning');
         return;
     }
 
     if (!credentialsText) {
-        alert('Google Credentials JSON을 입력하세요.');
+        showToast('Google Credentials JSON을 입력하세요.', 'warning');
         return;
     }
 
@@ -1012,7 +1145,7 @@ async function submitAddWorkspace() {
     try {
         credentialsJson = JSON.parse(credentialsText);
     } catch (error) {
-        alert('Google Credentials JSON 형식이 올바르지 않습니다.\n\n' + error.message);
+        showToast('Google Credentials JSON 형식이 올바르지 않습니다: ' + error.message, 'error', 7000);
         return;
     }
 
@@ -1037,6 +1170,7 @@ async function submitAddWorkspace() {
                 assignment_sheet_name: assignmentSheetName,
                 name_column: nameColumn,
                 start_row: startRow,
+                end_column: endColumn,
                 credentials_json: credentialsJson
             })
         });
@@ -1044,7 +1178,7 @@ async function submitAddWorkspace() {
         const data = await response.json();
 
         if (data.success) {
-            alert('✅ 워크스페이스가 추가되었습니다!\n\n워크스페이스: ' + displayName);
+            showToast('워크스페이스가 추가되었습니다: ' + displayName, 'success');
             closeAddWorkspaceModal();
             // 워크스페이스 목록 새로고침
             await loadWorkspaces();
@@ -1059,10 +1193,10 @@ async function submitAddWorkspace() {
             document.getElementById('sheet-name').textContent = selectedOption.dataset.sheetName;
             infoBox.style.display = 'block';
         } else {
-            alert('❌ 워크스페이스 추가 실패:\n\n' + data.error);
+            showToast('워크스페이스 추가 실패: ' + data.error, 'error', 7000);
         }
     } catch (error) {
-        alert('❌ 워크스페이스 추가 오류:\n\n' + error.message);
+        showToast('워크스페이스 추가 오류: ' + error.message, 'error', 7000);
     } finally {
         submitBtn.disabled = false;
         submitBtn.innerHTML = originalText;
@@ -1113,6 +1247,20 @@ function addScheduleItem() {
     const container = document.getElementById('schedules-list');
     const index = container.children.length;
 
+    // 출석 열 드롭다운 옵션 생성
+    let columnOptions = '<option value="">열 선택...</option>';
+    if (scheduleModalColumns && scheduleModalColumns.length > 0) {
+        scheduleModalColumns.forEach(col => {
+            columnOptions += `<option value="${col.letter}">${col.letter} - ${col.name}</option>`;
+        });
+    } else {
+        // 열 정보가 없으면 기본 옵션 제공
+        const defaultColumns = ['H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P'];
+        defaultColumns.forEach(col => {
+            columnOptions += `<option value="${col}">${col}</option>`;
+        });
+    }
+
     const scheduleHTML = '<div class="schedule-item" data-index="' + index + '" style="border: 1px solid #ddd; padding: 15px; margin-bottom: 10px; border-radius: 8px; background: #f9f9f9;">' +
         '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">' +
         '<h4 style="margin: 0;">스케줄 #' + (index + 1) + '</h4>' +
@@ -1130,7 +1278,9 @@ function addScheduleItem() {
         '<div class="form-group"><label>집계 시간</label>' +
         '<input type="time" class="form-control schedule-check-time" data-index="' + index + '"></div>' +
         '<div class="form-group"><label>출석 열</label>' +
-        '<input type="text" class="form-control schedule-column" data-index="' + index + '" maxlength="2" placeholder="H" style="max-width: 80px;"></div>' +
+        '<select class="form-control schedule-column" data-index="' + index + '" style="max-width: 150px;">' +
+        columnOptions +
+        '</select></div>' +
         '</div></div>';
 
     container.insertAdjacentHTML('beforeend', scheduleHTML);
@@ -1168,6 +1318,20 @@ function addEditScheduleItem() {
     const container = document.getElementById('edit-schedules-list');
     const index = container.children.length;
 
+    // 출석 열 드롭다운 옵션 생성
+    let columnOptions = '<option value="">열 선택...</option>';
+    if (scheduleModalColumns && scheduleModalColumns.length > 0) {
+        scheduleModalColumns.forEach(col => {
+            columnOptions += `<option value="${col.letter}">${col.letter} - ${col.name}</option>`;
+        });
+    } else {
+        // 열 정보가 없으면 기본 옵션 제공
+        const defaultColumns = ['H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P'];
+        defaultColumns.forEach(col => {
+            columnOptions += `<option value="${col}">${col}</option>`;
+        });
+    }
+
     const scheduleHTML = '<div class="schedule-item" data-index="' + index + '" style="border: 1px solid #ddd; padding: 15px; margin-bottom: 10px; border-radius: 8px; background: #f9f9f9;">' +
         '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">' +
         '<h4 style="margin: 0;">스케줄 #' + (index + 1) + '</h4>' +
@@ -1185,7 +1349,9 @@ function addEditScheduleItem() {
         '<div class="form-group"><label>집계 시간</label>' +
         '<input type="time" class="form-control edit-schedule-check-time" data-index="' + index + '"></div>' +
         '<div class="form-group"><label>출석 열</label>' +
-        '<input type="text" class="form-control edit-schedule-column" data-index="' + index + '" maxlength="2" placeholder="H" style="max-width: 80px;"></div>' +
+        '<select class="form-control edit-schedule-column" data-index="' + index + '" style="max-width: 150px;">' +
+        columnOptions +
+        '</select></div>' +
         '</div></div>';
 
     container.insertAdjacentHTML('beforeend', scheduleHTML);
@@ -1238,14 +1404,14 @@ async function deleteScheduleItem(workspaceName, scheduleIndex) {
         const data = await response.json();
 
         if (data.success) {
-            alert('✅ 스케줄이 삭제되었습니다!');
+            showToast('스케줄이 삭제되었습니다!', 'success');
             // 예약 현황 새로고침
             loadAllSchedules();
         } else {
-            alert('❌ 오류: ' + data.error);
+            showToast('오류: ' + data.error, 'error', 7000);
         }
     } catch (error) {
-        alert('❌ 오류: ' + error.message);
+        showToast('오류: ' + error.message, 'error', 7000);
     }
 }
 
@@ -1263,16 +1429,19 @@ async function toggleSchedule(workspaceName) {
         const data = await response.json();
 
         if (data.success) {
-            alert('✅ ' + data.message);
+            showToast(data.message, 'success');
             // 예약 현황 새로고침
             loadAllSchedules();
         } else {
-            alert('❌ 오류: ' + data.error);
+            showToast('오류: ' + data.error, 'error', 7000);
         }
     } catch (error) {
-        alert('❌ 오류: ' + error.message);
+        showToast('오류: ' + error.message, 'error', 7000);
     }
 }
+
+// 전역 변수: 스케줄 모달용 열 정보
+let scheduleModalColumns = [];
 
 // 스케줄 수정 모달 열기
 async function openEditScheduleModal(workspaceName) {
@@ -1285,6 +1454,16 @@ async function openEditScheduleModal(workspaceName) {
             return;
         }
 
+        // 워크스페이스의 열 정보 가져오기
+        const columnsResponse = await fetch(`/api/workspaces/${workspaceName}/sheet-columns`);
+        const columnsData = await columnsResponse.json();
+
+        if (columnsData.success && columnsData.columns) {
+            scheduleModalColumns = columnsData.columns;
+        } else {
+            scheduleModalColumns = [];
+        }
+
         const schedule = data.schedule || {};
 
         document.getElementById('edit-workspace-name').value = workspaceName;
@@ -1292,9 +1471,9 @@ async function openEditScheduleModal(workspaceName) {
         document.getElementById('edit-thread-message').value = schedule.create_thread_message || '';
         document.getElementById('edit-completion-message').value = schedule.check_completion_message || '';
         document.getElementById('edit-auto-column-enabled').checked = schedule.auto_column_enabled || false;
-        document.getElementById('edit-start-column').value = schedule.start_column || 'H';
-        document.getElementById('edit-end-column').value = schedule.end_column || 'O';
-        document.getElementById('edit-notification-user-id').value = data.notification_user_id || '';
+        document.getElementById('edit-schedule-start-column').value = schedule.start_column || 'H';
+        document.getElementById('edit-schedule-end-column').value = schedule.end_column || 'O';
+        document.getElementById('edit-schedule-notification-user-id').value = data.notification_user_id || '';
 
         const editAutoSettings = document.getElementById('edit-auto-column-settings');
         if (editAutoSettings) editAutoSettings.style.display = schedule.auto_column_enabled ? 'block' : 'none';
@@ -1356,11 +1535,11 @@ async function submitEditSchedule() {
             create_thread_message: document.getElementById('edit-thread-message').value,
             check_completion_message: document.getElementById('edit-completion-message').value,
             auto_column_enabled: document.getElementById('edit-auto-column-enabled').checked,
-            start_column: document.getElementById('edit-start-column').value.trim().toUpperCase(),
-            end_column: document.getElementById('edit-end-column').value.trim().toUpperCase()
+            start_column: document.getElementById('edit-schedule-start-column').value.trim().toUpperCase(),
+            end_column: document.getElementById('edit-schedule-end-column').value.trim().toUpperCase()
         };
 
-        const notification_user_id = document.getElementById('edit-notification-user-id').value.trim();
+        const notification_user_id = document.getElementById('edit-schedule-notification-user-id').value.trim();
 
         const response = await fetch('/api/schedule', {
             method: 'POST',
@@ -1377,14 +1556,14 @@ async function submitEditSchedule() {
         const data = await response.json();
 
         if (data.success) {
-            alert('✅ 스케줄이 수정되었습니다!');
+            showToast('스케줄이 수정되었습니다!', 'success');
             closeEditScheduleModal();
             loadAllSchedules();
         } else {
-            alert('❌ 스케줄 수정 실패:\n\n' + data.error);
+            showToast('스케줄 수정 실패: ' + data.error, 'error', 7000);
         }
     } catch (error) {
-        alert('❌ 스케줄 수정 오류:\n\n' + error.message);
+        showToast('스케줄 수정 오류: ' + error.message, 'error', 7000);
     } finally {
         btn.disabled = false;
         btn.innerHTML = originalText;
@@ -1398,9 +1577,11 @@ async function submitEditSchedule() {
 async function openEditWorkspaceModal() {
     const workspaceName = document.getElementById('workspace-select').value;
     if (!workspaceName) {
-        alert('워크스페이스를 먼저 선택하세요.');
+        showToast('워크스페이스를 먼저 선택하세요.', 'warning');
         return;
     }
+
+    const modal = document.getElementById('edit-workspace-modal');
 
     // 기존 정보 로드
     try {
@@ -1433,15 +1614,16 @@ async function openEditWorkspaceModal() {
             setValueSafe('edit-assignment-sheet-name', workspace.assignment_sheet_name || '실습과제현황');
             setValueSafe('edit-name-column', workspace.name_column || 'B');
             setValueSafe('edit-start-row', workspace.start_row || 4);
+            setValueSafe('edit-end-column', workspace.end_column || 'P');
             setValueSafe('edit-notification-user-id', workspace.notification_user_id);
 
             // 모달 표시
-            const modal = document.getElementById('edit-workspace-modal');
             if (modal) {
                 modal.style.display = 'flex';
+                setupModalFocusTrap(modal);
             } else {
                 console.error('Modal not found: edit-workspace-modal');
-                alert('워크스페이스 수정 모달을 찾을 수 없습니다. 페이지를 새로고침해주세요.');
+                showToast('워크스페이스 수정 모달을 찾을 수 없습니다. 페이지를 새로고침해주세요.', 'error');
             }
         } else {
             alert('워크스페이스 정보 로드 실패: ' + data.error);
@@ -1464,31 +1646,32 @@ async function saveEditWorkspace() {
     const assignmentSheetName = document.getElementById('edit-assignment-sheet-name').value.trim();
     const nameColumn = document.getElementById('edit-name-column').value.trim();
     const startRow = parseInt(document.getElementById('edit-start-row').value);
+    const endColumn = document.getElementById('edit-end-column').value.trim().toUpperCase();
     const notificationUserId = document.getElementById('edit-notification-user-id').value.trim();
 
     // 필수 항목 검증
     if (!displayName) {
-        alert('표시 이름은 필수입니다.');
+        showToast('표시 이름은 필수입니다.', 'warning');
         return;
     }
     if (!slackChannelId) {
-        alert('Slack Channel ID (출석)는 필수입니다.');
+        showToast('Slack Channel ID (출석)는 필수입니다.', 'warning');
         return;
     }
     if (!sheetName) {
-        alert('시트 이름 (출석)은 필수입니다.');
+        showToast('시트 이름 (출석)은 필수입니다.', 'warning');
         return;
     }
     if (!assignmentSheetName) {
-        alert('시트 이름 (과제)은 필수입니다.');
+        showToast('시트 이름 (과제)은 필수입니다.', 'warning');
         return;
     }
     if (!nameColumn) {
-        alert('이름 열은 필수입니다.');
+        showToast('이름 열은 필수입니다.', 'warning');
         return;
     }
     if (isNaN(startRow) || startRow < 1) {
-        alert('시작 행은 1 이상의 숫자여야 합니다.');
+        showToast('시작 행은 1 이상의 숫자여야 합니다.', 'warning');
         return;
     }
 
@@ -1509,6 +1692,7 @@ async function saveEditWorkspace() {
                 assignment_sheet_name: assignmentSheetName,
                 name_column: nameColumn,
                 start_row: startRow,
+                end_column: endColumn,
                 notification_user_id: notificationUserId
             })
         });
@@ -1516,16 +1700,16 @@ async function saveEditWorkspace() {
         const data = await response.json();
 
         if (data.success) {
-            alert('✅ 워크스페이스 정보가 수정되었습니다!');
+            showToast('워크스페이스 정보가 수정되었습니다!', 'success');
             closeEditWorkspaceModal();
 
             // 워크스페이스 목록 새로고침
             loadWorkspaces();
         } else {
-            alert('❌ 오류: ' + data.error);
+            showToast('오류: ' + data.error, 'error', 7000);
         }
     } catch (error) {
-        alert('❌ 오류: ' + error.message);
+        showToast('오류: ' + error.message, 'error', 7000);
     } finally {
         btn.disabled = false;
         btn.innerHTML = originalText;
@@ -1541,17 +1725,19 @@ let currentDuplicateNames = {};
 function openDuplicateNamesModal() {
     const workspaceName = document.getElementById('workspace-select').value;
     if (!workspaceName) {
-        alert('워크스페이스를 먼저 선택하세요.');
+        showToast('워크스페이스를 먼저 선택하세요.', 'warning');
         return;
     }
 
+    const modal = document.getElementById('duplicate-names-modal');
     document.getElementById('duplicate-workspace-name').value = workspaceName;
     document.getElementById('duplicate-workspace-display').textContent = workspaceName;
 
     // 기존 동명이인 정보 로드
     loadDuplicateNames(workspaceName);
 
-    document.getElementById('duplicate-names-modal').style.display = 'flex';
+    modal.style.display = 'flex';
+    setupModalFocusTrap(modal);
 }
 
 function closeDuplicateNamesModal() {
@@ -1775,7 +1961,7 @@ async function saveDuplicateNames() {
         }
 
         if (data.success) {
-            alert('✅ 동명이인 정보가 저장되었습니다!\n\n이메일이 User ID로 변환되었습니다.');
+            showToast('동명이인 정보가 저장되었습니다! 이메일이 User ID로 변환되었습니다.', 'success', 6000);
 
             // 변환된 데이터로 UI 업데이트
             if (data.converted_data) {
@@ -1786,14 +1972,14 @@ async function saveDuplicateNames() {
             }
         } else {
             // 변환 오류가 있는 경우
-            let errorMsg = '❌ ' + data.error;
+            let errorMsg = data.error;
             if (data.details && data.details.length > 0) {
-                errorMsg += '\n\n상세 오류:\n' + data.details.join('\n');
+                errorMsg += '\n상세 오류:\n' + data.details.join('\n');
             }
-            alert(errorMsg);
+            showToast(errorMsg, 'error', 10000);
         }
     } catch (error) {
-        alert('❌ 저장 오류:\n\n' + error.message);
+        showToast('저장 오류: ' + error.message, 'error', 7000);
     } finally {
         btn.disabled = false;
         btn.innerHTML = originalText;
@@ -1838,8 +2024,6 @@ async function saveDuplicateNames() {
                 // 탭별 초기화 함수 호출
                 if (tabName === 'assignment') {
                     loadAssignmentWorkspaces();
-                } else if (tabName === 'info') {
-                    loadInfoWorkspaces();
                 }
             });
         });
@@ -1858,24 +2042,12 @@ async function saveDuplicateNames() {
                 if (!workspace) {
                     const container = document.getElementById('recent-assignment-history');
                     if (container) container.innerHTML = '';
+                    resetColumnDropdowns();
                     return;
                 }
                 await loadRecentAssignmentHistory(workspace);
-            });
-        }
-
-        // 정보조회 탭 워크스페이스 선택 이벤트
-        const infoWorkspaceSelect = document.getElementById('info-workspace-select');
-        if (infoWorkspaceSelect) {
-            infoWorkspaceSelect.addEventListener('change', async function(e) {
-                const workspace = e.target.value;
-                if (!workspace) {
-                    document.getElementById('schedule-info').style.display = 'none';
-                    document.getElementById('assignment-history-section').style.display = 'none';
-                    return;
-                }
-                await loadScheduleInfo(workspace);
-                await loadAssignmentHistoryFull(workspace);
+                // 과제체크 탭에서도 열 정보 로드
+                loadSheetColumns(workspace);
             });
         }
     };
@@ -1911,7 +2083,7 @@ async function runAssignmentCheck() {
     const markAbsent = document.getElementById('assignment-mark-absent').checked;
 
     if (!workspace || !threadInput || !column) {
-        alert('모든 필드를 입력해주세요.');
+        showToast('모든 필드를 입력해주세요.', 'warning');
         return;
     }
 
@@ -1937,12 +2109,12 @@ async function runAssignmentCheck() {
         if (data.success) {
             displayAssignmentResult(data.result);
             loadRecentAssignmentHistory(workspace);
-            alert('✅ 과제 체크가 완료되었습니다!');
+            showToast('과제 체크가 완료되었습니다!', 'success');
         } else {
-            alert(`❌ 오류: ${data.error}`);
+            showToast(`오류: ${data.error}`, 'error', 7000);
         }
     } catch (error) {
-        alert(`❌ 오류: ${error.message}`);
+        showToast(`오류: ${error.message}`, 'error', 7000);
     } finally {
         btn.disabled = false;
         btn.innerHTML = originalText;
@@ -2022,121 +2194,6 @@ async function loadRecentAssignmentHistory(workspace) {
     }
 }
 
-// 정보조회 탭 워크스페이스 로드
-async function loadInfoWorkspaces() {
-    const select = document.getElementById('info-workspace-select');
-    if (!select || select.options.length > 1) return;
-
-    try {
-        const response = await fetch('/api/workspaces');
-        const data = await response.json();
-
-        if (data.success) {
-            data.workspaces.forEach(ws => {
-                const option = document.createElement('option');
-                option.value = ws.folder_name;
-                option.textContent = ws.name;
-                select.appendChild(option);
-            });
-        }
-    } catch (error) {
-        console.error('워크스페이스 로드 오류:', error);
-    }
-}
-
-// 스케줄 정보 로드
-async function loadScheduleInfo(workspace) {
-    try {
-        const response = await fetch(`/api/schedule/${workspace}`);
-        const data = await response.json();
-
-        if (data.success && data.schedule && data.schedule.enabled) {
-            const scheduleSection = document.getElementById('schedule-info');
-            const scheduleDetails = document.getElementById('schedule-details');
-            const schedule = data.schedule;
-            const schedules = schedule.schedules || [];
-
-            // 요일 한글 변환
-            const dayNames = {
-                'mon': '월', 'tue': '화', 'wed': '수', 'thu': '목',
-                'fri': '금', 'sat': '토', 'sun': '일'
-            };
-
-            if (schedules.length > 0) {
-                scheduleDetails.innerHTML = schedules.map(item => {
-                    const dayKorean = dayNames[item.day] || item.day;
-                    return `
-                    <div class="info-box" style="margin-bottom: 15px;">
-                        <p><strong>📌 ${dayKorean}요일</strong></p>
-                        ${item.create_thread_time ? `<p>• 출석 스레드 생성: ${item.create_thread_time}</p>` : ''}
-                        ${item.check_attendance_time ? `<p>• 출석 집계: ${item.check_attendance_time} (${item.check_attendance_column || ''}열)</p>` : ''}
-                    </div>
-                `;
-                }).join('');
-                scheduleSection.style.display = 'block';
-            }
-        } else {
-            document.getElementById('schedule-info').style.display = 'none';
-        }
-    } catch (error) {
-        console.error('스케줄 정보 로드 오류:', error);
-    }
-}
-
-// 전체 과제 체크 기록 로드
-async function loadAssignmentHistoryFull(workspace) {
-    try {
-        const response = await fetch(`/api/assignment-history/${workspace}`);
-        const data = await response.json();
-
-        if (data.success) {
-            const section = document.getElementById('assignment-history-section');
-            const container = document.getElementById('assignment-history-list');
-
-            if (data.history.length === 0) {
-                container.innerHTML = '<p class="info-text">아직 과제 체크 기록이 없습니다.</p>';
-                section.style.display = 'block';
-                return;
-            }
-
-            container.innerHTML = data.history.map((record, index) => `
-                <div class="history-item" style="cursor: pointer;" onclick="toggleHistoryDetail('history-detail-${index}')">
-                    <div class="history-header">🕐 ${record.timestamp}</div>
-                    <div class="history-body">
-                        <p><strong>열:</strong> ${record.column}열</p>
-                        <p><strong>제출:</strong> ${record.submitted_count}명 / <strong>미제출:</strong> ${record.not_submitted_count}명</p>
-                        ${record.thread_link ? `<a href="${record.thread_link}" target="_blank" class="btn btn-small" onclick="event.stopPropagation()">슬랙에서 보기</a>` : ''}
-                        <p style="font-size: 0.85rem; color: #888; margin-top: 5px;">▼ 클릭하여 상세 보기</p>
-                    </div>
-                    <div id="history-detail-${index}" class="history-detail" style="display: none; margin-top: 15px; padding-top: 15px; border-top: 1px solid #e0e0e0;">
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                            <div>
-                                <h4 style="color: #28a745; margin-bottom: 10px;">✅ 제출자 (${record.submitted_count}명)</h4>
-                                <ul style="max-height: 300px; overflow-y: auto; padding-left: 20px;">
-                                    ${record.submitted_list && record.submitted_list.length > 0
-                                        ? record.submitted_list.map(name => `<li>${name}</li>`).join('')
-                                        : '<li style="color: #999;">제출자가 없습니다.</li>'}
-                                </ul>
-                            </div>
-                            <div>
-                                <h4 style="color: #dc3545; margin-bottom: 10px;">❌ 미제출자 (${record.not_submitted_count}명)</h4>
-                                <ul style="max-height: 300px; overflow-y: auto; padding-left: 20px;">
-                                    ${record.not_submitted_list && record.not_submitted_list.length > 0
-                                        ? record.not_submitted_list.map(name => `<li>${name}</li>`).join('')
-                                        : '<li style="color: #999;">모두 제출했습니다!</li>'}
-                                </ul>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            `).join('');
-            section.style.display = 'block';
-        }
-    } catch (error) {
-        console.error('과제 기록 로드 오류:', error);
-    }
-}
-
 // 과제 이력 상세 토글
 function toggleHistoryDetail(detailId) {
     const detailElement = document.getElementById(detailId);
@@ -2147,4 +2204,335 @@ function toggleHistoryDetail(detailId) {
             detailElement.style.display = 'none';
         }
     }
+}
+
+// ========================================
+// 시트 열 드롭다운 관리
+// ========================================
+
+// 시트 열 정보 로드
+async function loadSheetColumns(workspaceName) {
+    try {
+        const response = await fetch(`/api/workspaces/${workspaceName}/sheet-columns`);
+        const data = await response.json();
+
+        if (data.success && data.columns) {
+            // 스케줄 모달용 열 정보 저장
+            scheduleModalColumns = data.columns;
+
+            // 출석체크 열 드롭다운 채우기
+            const columnSelect = document.getElementById('column-select');
+            columnSelect.innerHTML = '<option value="">열을 선택하세요...</option>';
+
+            data.columns.forEach(col => {
+                const option = document.createElement('option');
+                option.value = col.letter;
+                option.textContent = `${col.letter} - ${col.name}`;
+                columnSelect.appendChild(option);
+            });
+
+            // 과제체크 열 드롭다운 채우기 (과제 시트용)
+            loadAssignmentSheetColumns(workspaceName);
+        } else {
+            showToast('시트 열 정보를 불러올 수 없습니다.', 'warning');
+        }
+    } catch (error) {
+        console.error('시트 열 로드 오류:', error);
+        // 오류가 나도 사용자 경험을 해치지 않도록 조용히 처리
+    }
+}
+
+// 과제 시트의 열 정보 로드
+async function loadAssignmentSheetColumns(workspaceName) {
+    try {
+        // 과제 시트는 별도의 API로 가져오기
+        const response = await fetch(`/api/workspaces/${workspaceName}/assignment-sheet-columns`);
+        const data = await response.json();
+
+        if (data.success && data.columns) {
+            const assignmentColumnSelect = document.getElementById('assignment-column-select');
+            assignmentColumnSelect.innerHTML = '<option value="">열을 선택하세요...</option>';
+
+            data.columns.forEach(col => {
+                const option = document.createElement('option');
+                option.value = col.letter;
+                option.textContent = `${col.letter} - ${col.name}`;
+                assignmentColumnSelect.appendChild(option);
+            });
+        }
+    } catch (error) {
+        console.error('과제 시트 열 로드 오류:', error);
+    }
+}
+
+// 열 드롭다운 초기화
+function resetColumnDropdowns() {
+    const columnSelect = document.getElementById('column-select');
+    const assignmentColumnSelect = document.getElementById('assignment-column-select');
+
+    if (columnSelect) {
+        columnSelect.innerHTML = '<option value="">워크스페이스를 먼저 선택하세요...</option>';
+    }
+
+    if (assignmentColumnSelect) {
+        assignmentColumnSelect.innerHTML = '<option value="">워크스페이스를 먼저 선택하세요...</option>';
+    }
+}
+
+// ========================================
+// 실시간 폼 유효성 검사
+// ========================================
+
+// 유효성 검사 규칙
+const validationRules = {
+    'new-bot-token': {
+        validate: (value) => value.startsWith('xoxb-'),
+        message: 'Bot Token은 xoxb-로 시작해야 합니다.'
+    },
+    'new-channel-id': {
+        validate: (value) => value.startsWith('C'),
+        message: 'Channel ID는 C로 시작해야 합니다.'
+    },
+    'new-assignment-channel-id': {
+        validate: (value) => !value || value.startsWith('C'),
+        message: 'Channel ID는 C로 시작해야 합니다.'
+    },
+    'column-input': {
+        validate: (value) => /^[A-Z]{1,2}$/i.test(value),
+        message: '올바른 열 이름을 입력하세요 (예: H, K, AB)'
+    },
+    'assignment-column': {
+        validate: (value) => /^[A-Z]{1,2}$/i.test(value),
+        message: '올바른 열 이름을 입력하세요 (예: D, E, AA)'
+    }
+};
+
+// 필드에 유효성 검사 추가
+function setupFormValidation() {
+    Object.keys(validationRules).forEach(fieldId => {
+        const field = document.getElementById(fieldId);
+        if (!field) return;
+
+        const rule = validationRules[fieldId];
+
+        // 입력 이벤트 리스너
+        field.addEventListener('input', function() {
+            validateField(field, rule);
+        });
+
+        // blur 이벤트에서도 검증
+        field.addEventListener('blur', function() {
+            if (field.value.trim()) {
+                validateField(field, rule);
+            }
+        });
+    });
+}
+
+// 개별 필드 검증
+function validateField(field, rule) {
+    const value = field.value.trim();
+
+    // 값이 비어있으면 검증 스타일 제거
+    if (!value) {
+        clearFieldValidation(field);
+        return true;
+    }
+
+    const isValid = rule.validate(value);
+
+    if (isValid) {
+        field.classList.remove('is-invalid');
+        field.classList.add('is-valid');
+        removeFieldError(field);
+    } else {
+        field.classList.remove('is-valid');
+        field.classList.add('is-invalid');
+        showFieldError(field, rule.message);
+    }
+
+    return isValid;
+}
+
+// 필드 검증 스타일 제거
+function clearFieldValidation(field) {
+    field.classList.remove('is-valid', 'is-invalid');
+    removeFieldError(field);
+}
+
+// 오류 메시지 표시
+function showFieldError(field, message) {
+    removeFieldError(field);
+
+    const errorDiv = document.createElement('div');
+    errorDiv.className = 'invalid-feedback';
+    errorDiv.textContent = message;
+    errorDiv.id = `${field.id}-error`;
+
+    field.parentNode.appendChild(errorDiv);
+}
+
+// 오류 메시지 제거
+function removeFieldError(field) {
+    const existingError = document.getElementById(`${field.id}-error`);
+    if (existingError) {
+        existingError.remove();
+    }
+}
+
+// DOM 로드 시 폼 검증 설정 추가
+document.addEventListener('DOMContentLoaded', function() {
+    setupFormValidation();
+});
+
+// ========================================
+// 로딩 인디케이터
+// ========================================
+
+// 전체 화면 로딩 표시
+function showLoadingOverlay(message = '처리 중입니다...') {
+    // 기존 오버레이 제거
+    hideLoadingOverlay();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'loading-overlay';
+    overlay.id = 'loading-overlay';
+    overlay.innerHTML = `
+        <div class="spinner-container">
+            <div class="spinner spinner-large"></div>
+            <div class="loading-text">${message}</div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+}
+
+// 전체 화면 로딩 숨기기
+function hideLoadingOverlay() {
+    const overlay = document.getElementById('loading-overlay');
+    if (overlay) {
+        overlay.remove();
+    }
+}
+
+// 버튼 로딩 상태 설정
+function setButtonLoading(button, isLoading, loadingText = '처리 중...') {
+    if (isLoading) {
+        button.disabled = true;
+        button.dataset.originalText = button.innerHTML;
+        button.innerHTML = `<span class="spinner"></span>${loadingText}`;
+    } else {
+        button.disabled = false;
+        button.innerHTML = button.dataset.originalText || button.innerHTML;
+    }
+}
+
+// ========================================
+// 키보드 접근성
+// ========================================
+
+// 모달 포커스 트랩 설정
+function setupModalFocusTrap(modal) {
+    const focusableElements = modal.querySelectorAll(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    const firstFocusable = focusableElements[0];
+    const lastFocusable = focusableElements[focusableElements.length - 1];
+
+    // 첫 번째 요소에 포커스
+    if (firstFocusable) {
+        setTimeout(() => firstFocusable.focus(), 100);
+    }
+
+    // 탭 키 트랩
+    modal.addEventListener('keydown', function(e) {
+        if (e.key !== 'Tab') return;
+
+        if (e.shiftKey) {
+            // Shift + Tab
+            if (document.activeElement === firstFocusable) {
+                lastFocusable.focus();
+                e.preventDefault();
+            }
+        } else {
+            // Tab
+            if (document.activeElement === lastFocusable) {
+                firstFocusable.focus();
+                e.preventDefault();
+            }
+        }
+    });
+}
+
+// 모달 열기 시 포커스 트랩 적용 (기존 모달 열기 함수 개선)
+function openModalWithFocus(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) {
+        modal.style.display = 'flex';
+        setupModalFocusTrap(modal);
+    }
+}
+
+// ========================================
+// 결과 복사 기능
+// ========================================
+
+// 출석 체크 결과 복사
+function copyAttendanceResult() {
+    const total = document.getElementById('stat-total').textContent;
+    const present = document.getElementById('stat-present').textContent;
+    const absent = document.getElementById('stat-absent').textContent;
+    const rate = document.getElementById('stat-rate').textContent;
+
+    const presentList = document.getElementById('present-list').textContent;
+    const absentList = document.getElementById('absent-list').textContent;
+
+    const text = `📊 출석 체크 결과
+
+✅ 출석: ${present}명
+❌ 미출석: ${absent}명
+📈 출석률: ${rate}
+👥 총 인원: ${total}명
+
+✅ 출석자:
+${presentList || '(없음)'}
+
+❌ 미출석자:
+${absentList || '(없음)'}`;
+
+    copyToClipboard(text);
+}
+
+// 클립보드에 복사
+function copyToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+            showToast('결과가 클립보드에 복사되었습니다!', 'success', 3000);
+        }).catch(err => {
+            fallbackCopyToClipboard(text);
+        });
+    } else {
+        fallbackCopyToClipboard(text);
+    }
+}
+
+// 폴백 복사 방법 (구형 브라우저)
+function fallbackCopyToClipboard(text) {
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    textArea.style.position = 'fixed';
+    textArea.style.top = '-9999px';
+    textArea.style.left = '-9999px';
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+
+    try {
+        document.execCommand('copy');
+        showToast('결과가 클립보드에 복사되었습니다!', 'success', 3000);
+    } catch (err) {
+        showToast('복사에 실패했습니다. 브라우저가 지원하지 않습니다.', 'error');
+    }
+
+    document.body.removeChild(textArea);
 }
