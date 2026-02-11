@@ -12,9 +12,14 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from datetime import datetime
 import pytz
+import time
+from colorama import Fore, Style, init
 
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, str(Path(__file__).parent))
+
+# Colorama 초기화 (Windows CMD 색상 지원)
+init(autoreset=True)
 
 from src.workspace_manager import WorkspaceManager
 from src.slack_handler import SlackHandler
@@ -245,15 +250,24 @@ def check_attendance_job(workspace, schedule_item):
 
         print(f"✓ 출석자 수: {len(attendance_list)}명")
 
-        # 5. 구글 시트 연결
+        # 5. 구글 시트 연결 (타임아웃 대비 최대 3회 재시도)
         sheets_handler = SheetsHandler(
             credentials_path=workspace.credentials_path,
             spreadsheet_id=workspace.spreadsheet_id,
             sheet_name=workspace.sheet_name
         )
 
-        if not sheets_handler.connect() or not sheets_handler.test_connection():
-            print("✗ 구글 시트 연결 실패")
+        connected = False
+        for attempt in range(1, 4):
+            if sheets_handler.connect() and sheets_handler.test_connection():
+                connected = True
+                break
+            print(f"⚠ 구글 시트 연결 시도 {attempt}/3 실패, {'재시도 중...' if attempt < 3 else '포기'}")
+            if attempt < 3:
+                time.sleep(5)
+
+        if not connected:
+            print("✗ 구글 시트 연결 실패 (3회 시도 모두 실패)")
             return
 
         # 6. 학생 명단 읽기
@@ -451,6 +465,9 @@ def setup_scheduler():
         'sun': '일요일', 'sunday': '일요일'
     }
 
+    # 오늘 요일 확인 (mon, tue, wed, thu, fri, sat, sun)
+    today_day = datetime.now(KST).strftime('%a').lower()  # 'mon', 'tue', etc.
+
     workspaces = workspace_manager.get_all_workspaces()
 
     for workspace in workspaces:
@@ -478,6 +495,11 @@ def setup_scheduler():
             day_en = day_mapping.get(day_lower, day_lower)  # 매핑 실패 시 원본 사용
             day_korean = day_to_korean.get(day_lower, day)  # 한글 표시용
 
+            # 오늘 스케줄인지 확인
+            is_today = (day_en == today_day)
+            color_prefix = f"{Fore.GREEN}{Style.BRIGHT}" if is_today else ""
+            color_suffix = Style.RESET_ALL if is_today else ""
+
             # 출석 스레드 생성 스케줄
             if day and create_time:
                 try:
@@ -490,7 +512,7 @@ def setup_scheduler():
                         replace_existing=True
                     )
 
-                    print(f"  ✓ 출석 스레드 생성: 매주 {day_korean} {create_time} (job_id: {job_id})")
+                    print(f"{color_prefix}  ✓ 출석 스레드 생성: 매주 {day_korean} {create_time} (job_id: {job_id}){color_suffix}")
                 except Exception as e:
                     print(f"  ✗ 스케줄 등록 실패: {day_korean} {create_time} - {e}")
 
@@ -506,7 +528,7 @@ def setup_scheduler():
                         replace_existing=True
                     )
 
-                    print(f"  ✓ 출석 집계: 매주 {day_korean} {check_time} (열: {check_column}, job_id: {job_id})")
+                    print(f"{color_prefix}  ✓ 출석 집계: 매주 {day_korean} {check_time} (열: {check_column}, job_id: {job_id}){color_suffix}")
                 except Exception as e:
                     print(f"  ✗ 스케줄 등록 실패: {day_korean} {check_time} - {e}")
 

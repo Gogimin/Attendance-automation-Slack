@@ -26,3 +26,6 @@ APScheduler==3.10.4
 
 # Image processing
 pillow==10.2.0
+
+# Terminal colors (for Windows CMD)
+colorama==0.4.6
